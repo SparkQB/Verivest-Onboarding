@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Verivest — New Deal Handover</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --eerie-black: #121827;
+  --navy: #0f1520;
+  --card-dark: rgb(18,24,39);
+  --persimmon: #f85850;
+  --white: #ffffff;
+  --gray-300: #868898;
+  --gray-light: #b0b5c3;
+  --border: rgba(255,255,255,0.07);
+  --green: #1db87a;
+  --amber: #e89520;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Inter',sans-serif; background:var(--eerie-black); color:var(--white); min-height:100vh; -webkit-font-smoothing:antialiased; }
+
+/* NAV */
+.site-nav { background:var(--navy); border-bottom:1px solid var(--border); padding:0 48px; display:flex; align-items:center; justify-content:space-between; height:64px; position:sticky; top:0; z-index:100; }
+.nav-tag { font-size:11px; font-weight:500; letter-spacing:0.12em; text-transform:uppercase; color:var(--gray-300); }
+
+/* PROGRESS */
+.progress-bar-wrap { background:var(--card-dark); border-bottom:1px solid var(--border); padding:0 48px; display:flex; overflow-x:auto; }
+.progress-step { display:flex; align-items:center; gap:8px; padding:16px 24px 16px 0; font-size:12px; font-weight:500; color:var(--gray-300); white-space:nowrap; border-bottom:2px solid transparent; transition:all 0.2s; cursor:default; flex-shrink:0; }
+.progress-step.active { color:var(--white); border-bottom-color:var(--persimmon); }
+.progress-step.done { color:var(--green); border-bottom-color:var(--green); }
+.step-num { width:20px; height:20px; border-radius:50%; background:rgba(255,255,255,0.08); color:var(--gray-300); font-size:10px; font-weight:600; display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:all 0.2s; }
+.progress-step.active .step-num { background:var(--persimmon); color:white; }
+.progress-step.done .step-num { background:var(--green); color:white; }
+
+/* PAGES */
+.page { display:none; }
+.page.active { display:block; animation:fadeIn 0.25s ease; }
+@keyframes fadeIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+
+.container { max-width:740px; margin:0 auto; padding:48px 40px 80px; }
+
+.page-eyebrow { font-size:11px; font-weight:500; letter-spacing:0.15em; text-transform:uppercase; color:var(--persimmon); margin-bottom:10px; }
+.page-title { font-size:2rem; font-weight:700; color:var(--white); line-height:1.15; margin-bottom:10px; letter-spacing:-0.02em; }
+.page-sub { font-size:14px; font-weight:300; color:var(--gray-light); line-height:1.65; margin-bottom:2rem; max-width:520px; }
+
+/* CARDS */
+.section-card { background:var(--white); border-radius:5px; padding:24px; margin-bottom:16px; position:relative; overflow:hidden; }
+.section-card::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; background:var(--persimmon); }
+.section-card-title { font-size:10px; font-weight:600; letter-spacing:0.14em; text-transform:uppercase; color:var(--persimmon); margin-bottom:20px; }
+
+/* GRID */
+.field-row-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
+.field-row-2:last-child { margin-bottom:0; }
+
+/* INDIVIDUAL FIELD */
+.field { margin-bottom:16px; }
+.field:last-child { margin-bottom:0; }
+
+.field label { display:block; font-size:12px; font-weight:600; color:#1a202c; margin-bottom:5px; letter-spacing:0.01em; }
+.field label .req { color:var(--persimmon); margin-left:2px; }
+.field-hint { font-size:11px; color:#6b7280; margin-top:4px; line-height:1.45; }
+
+input[type="text"], input[type="email"], input[type="tel"], input[type="url"], input[type="date"], input[type="number"], select, textarea {
+  width:100%; padding:9px 12px; font-family:'Inter',sans-serif; font-size:13px; color:#1a202c;
+  background:#f7f8fa; border:1px solid rgba(0,0,0,0.12); border-radius:3px;
+  outline:none; transition:border-color 0.15s, box-shadow 0.15s; appearance:none; -webkit-appearance:none;
+}
+input:focus, select:focus, textarea:focus { border-color:var(--persimmon); background:white; box-shadow:0 0 0 3px rgba(248,88,80,0.1); }
+select {
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%236b7280' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat:no-repeat; background-position:right 12px center; padding-right:32px; cursor:pointer;
+}
+textarea { resize:vertical; min-height:80px; line-height:1.6; }
+textarea.tall { min-height:110px; }
+input::placeholder, textarea::placeholder { color:#c0c4ce; }
+
+/* RADIO */
+.radio-group { display:flex; gap:8px; flex-wrap:wrap; margin-top:2px; }
+.radio-opt { display:flex; align-items:center; gap:6px; padding:7px 14px; border:1px solid rgba(0,0,0,0.12); border-radius:3px; cursor:pointer; font-size:12px; font-weight:500; color:#4a5568; background:#f7f8fa; transition:all 0.15s; user-select:none; }
+.radio-opt:hover { border-color:var(--persimmon); color:#1a202c; }
+.radio-opt input { display:none; }
+.radio-opt.selected { background:#fff0ef; border-color:var(--persimmon); color:var(--persimmon); font-weight:600; }
+
+/* DOC TABLE */
+.doc-table { width:100%; border-collapse:collapse; }
+.doc-table th { font-size:10px; font-weight:600; letter-spacing:0.12em; text-transform:uppercase; color:#6b7280; text-align:left; padding:8px 10px; background:#f7f8fa; border-bottom:1px solid rgba(0,0,0,0.08); }
+.doc-table td { padding:9px 10px; border-bottom:1px solid rgba(0,0,0,0.06); font-size:13px; vertical-align:middle; color:#1a202c; font-weight:500; }
+.doc-table tr:last-child td { border-bottom:none; }
+.doc-table td:last-child { width:180px; }
+.doc-table select { padding:5px 28px 5px 8px; font-size:12px; }
+
+/* REVIEW */
+.review-section { background:var(--white); border-radius:5px; margin-bottom:12px; overflow:hidden; }
+.review-section::before { content:''; display:block; height:2px; background:var(--persimmon); }
+.review-section-header { background:#f7f8fa; color:#6b7280; font-size:10px; font-weight:600; letter-spacing:0.12em; text-transform:uppercase; padding:10px 16px; border-bottom:1px solid rgba(0,0,0,0.06); }
+.review-row { display:flex; gap:12px; padding:9px 16px; border-bottom:1px solid rgba(0,0,0,0.04); font-size:13px; align-items:baseline; }
+.review-row:last-child { border-bottom:none; }
+.review-label { color:#6b7280; min-width:200px; flex-shrink:0; font-size:12px; font-weight:500; }
+.review-value { color:#1a202c; flex:1; }
+
+/* BUTTONS */
+.nav-row { display:flex; align-items:center; gap:10px; margin-top:2rem; padding-top:1.5rem; border-top:1px solid var(--border); }
+.btn { display:inline-flex; align-items:center; gap:7px; padding:10px 20px; font-family:'Inter',sans-serif; font-size:13px; font-weight:600; border-radius:3px; cursor:pointer; border:none; outline:none; transition:all 0.15s; }
+.btn-primary { background:var(--persimmon); color:white; }
+.btn-primary:hover { opacity:0.88; transform:translateY(-1px); }
+.btn-primary:active { transform:scale(0.98); }
+.btn-ghost { background:transparent; color:var(--gray-light); border:1px solid rgba(255,255,255,0.12); }
+.btn-ghost:hover { border-color:rgba(255,255,255,0.3); color:white; }
+
+/* STATUS */
+.loading-row { display:flex; align-items:center; gap:12px; padding:20px; color:var(--gray-light); font-size:14px; background:var(--card-dark); border:1px solid var(--border); border-radius:5px; margin-bottom:12px; }
+@keyframes spin { to { transform:rotate(360deg); } }
+.spinner { width:18px; height:18px; border:2px solid rgba(255,255,255,0.12); border-top-color:var(--persimmon); border-radius:50%; animation:spin 0.7s linear infinite; flex-shrink:0; }
+.status-box { padding:16px 20px; border-radius:5px; font-size:13px; margin-bottom:12px; line-height:1.6; }
+.status-box.success { background:rgba(29,184,122,0.1); border:1px solid rgba(29,184,122,0.25); color:var(--green); }
+.status-box.error { background:rgba(248,88,80,0.1); border:1px solid rgba(248,88,80,0.25); color:var(--persimmon); }
+.status-box.warning { background:rgba(232,149,32,0.1); border:1px solid rgba(232,149,32,0.25); color:var(--amber); }
+.clickup-link { display:inline-flex; align-items:center; gap:6px; color:var(--green); font-weight:600; text-decoration:none; font-size:13px; margin-top:8px; }
+.clickup-link:hover { text-decoration:underline; }
+.ai-output { background:var(--card-dark); border:1px solid var(--border); border-radius:5px; padding:20px; font-size:13px; line-height:1.8; color:var(--gray-light); white-space:pre-wrap; max-height:400px; overflow-y:auto; margin-bottom:12px; }
+.ai-output-label { font-size:10px; font-weight:600; letter-spacing:0.12em; text-transform:uppercase; color:var(--gray-300); margin-bottom:10px; }
+
+footer { border-top:1px solid var(--border); text-align:center; padding:22px; font-size:10px; font-weight:500; letter-spacing:0.15em; text-transform:uppercase; color:rgba(255,255,255,0.18); }
+
+@media (max-width:640px) {
+  .site-nav { padding:0 20px; }
+  .progress-bar-wrap { padding:0 20px; }
+  .container { padding:32px 20px 60px; }
+  .field-row-2 { grid-template-columns:1fr; }
+  .page-title { font-size:1.5rem; }
+}
+</style>
+</head>
+<body>
+
+<nav class="site-nav">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 441.42 80.6" style="height:20px;width:auto;display:block;flex-shrink:0"><defs><style>.cls-1,.cls-2,.cls-3{fill:#fff}.cls-2{fill-rule:evenodd}.cls-3{opacity:.5}</style></defs><g><g><g><path class="cls-1" d="m265.93,37.38v42.26h10.61v-42.26h-10.61Z"/><path class="cls-1" d="m271.32,33.27c3.29,0,5.96-2.8,5.96-5.93s-2.68-5.85-5.96-5.85-6.05,2.71-6.05,5.85,2.67,5.93,6.05,5.93Z"/><path class="cls-1" d="m389.67,62.37c-4.6-1.17-8.41-2.41-11.08-4.31-2.69-1.92-4.22-4.5-4.26-8.3h0c0-4,1.68-7.37,4.58-9.73,2.89-2.36,6.97-3.7,11.75-3.7,5.9,0,11.79,2.04,16.44,5.05l.23.15-4.48,7.67-.26-.16c-3.99-2.48-8.29-3.75-11.93-3.75-1.73,0-3.24.34-4.3.94-1.06.6-1.65,1.44-1.65,2.48,0,.62.13,1.12.4,1.54.28.43.71.81,1.37,1.17,1.33.75,3.47,1.4,6.73,2.33,3.57.97,7.34,2.06,10.21,4.03,2.89,1.98,4.88,4.85,4.88,9.31,0,4.08-1.72,7.45-4.72,9.79-2.99,2.34-7.23,3.64-12.26,3.64-6.57,0-12.45-2.29-17.59-6.35l-.2-.16,4.83-7.32.25.18c4.09,2.89,7.63,4.78,12.89,4.78,1.98,0,3.62-.42,4.77-1.12,1.14-.7,1.77-1.69,1.77-2.86,0-.75-.21-1.36-.6-1.88-.39-.53-.96-.98-1.71-1.38-1.49-.81-3.59-1.38-6.03-2.03Z"/><path class="cls-1" d="m309.82,79.64h-2.11c-1.39,0-3.3,0-5.25-.86-2-.88-4.01-2.66-5.55-6.17l-15.42-35.23h11.24l12.13,29.04,11.89-29.04h11.32l-18.25,42.26Z"/><path class="cls-1" d="m237.28,38.12c1.92.71,4.25,2.32,6.08,5.83,2.61-4.77,7.75-6.48,13.61-6.77.66-.03,2.16-.05,2.84-.05h.29v8.96h-.29c-.68,0-2.16.03-2.8.09-3.94.36-7.18,1.79-9.42,4.01-2.24,2.22-3.52,5.25-3.52,8.84v20.85h-10.61v-42.22l.25-.04h0s0,0,0,0h.02s.03,0,.06,0c.05,0,.12-.01.21-.02.18-.01.44-.02.76,0,.64.03,1.52.16,2.53.53Z"/><path class="cls-1" d="m439.79,77.01l-3.13-7.19-.31.3c-.84.83-2.33,1.45-3.99,1.45-2.18,0-3.9-1.85-3.9-4.55v-21h12.96l-3.52-8.72h-9.44v-4.71c0-3.72-3.07-6.74-6.87-6.74h-3.5v11.45h-6.17v8.72h6.17v22.21c0,3.57,1.26,6.65,3.43,8.84,2.18,2.19,5.25,3.46,8.86,3.46,3.28,0,6.8-1.32,9.23-3.38l.16-.14Z"/><path class="cls-2" d="m195.87,62.14c1.31,5.4,5.57,8.87,11.39,8.87s9.29-1.84,11.82-3.29l.28-.16,3.6,8.13-.19.14c-4.05,2.93-10.18,4.78-15.43,4.78-12.32,0-22.49-9.23-22.49-22.22s9.66-21.98,21.91-21.98c5.15,0,9.49,1.48,12.86,4.21,3.37,2.73,5.77,6.7,7.08,11.64,1.25,4.72.62,8.79.48,9.63l-.04.24h-31.28Zm18.32-14.01c-1.74-1.53-4.07-2.44-7.01-2.44-5.33,0-9.66,3.22-11.21,8.38h21.61c-.59-2.42-1.73-4.48-3.39-5.94Z"/><path class="cls-2" d="m349.61,70.93c-5.82,0-10.08-3.47-11.39-8.87h31.28l.04-.24c.14-.85.77-4.91-.48-9.63-1.31-4.94-3.7-8.91-7.08-11.64-3.38-2.73-7.71-4.21-12.86-4.21-12.25,0-21.91,9.32-21.91,21.98s10.17,22.22,22.49,22.22c5.25,0,11.38-1.85,15.43-4.78l.19-.14-3.6-8.13-.28.16c-2.53,1.44-6.28,3.29-11.82,3.29Zm-.08-25.32c2.93,0,5.27.91,7.01,2.44,1.66,1.46,2.8,3.52,3.39,5.94h-21.61c1.54-5.15,5.88-8.38,11.21-8.38Z"/><path class="cls-1" d="m166.99,79.64h-4.03c-1.39,0-3.3,0-5.25-.86-2-.88-4.01-2.66-5.55-6.17h0s-20.82-49.01-20.82-49.01h11.95l17.7,41.7,17.7-41.7h12.19l-23.89,56.04Z"/></g><path class="cls-3" d="m119.27,0l-35.46,75.57c-1.02,2.18-3.22,3.58-5.63,3.58h0c-2.41,0-4.6-1.39-5.63-3.58l-14.51-30.91,15.48-33c3.34-7.12,10.49-11.66,18.35-11.66h27.39Z"/><path class="cls-1" d="m67.94,78.81c-1.1-.42-1.99-1.25-2.49-2.31l-19.69-41.97c-3.34-7.12-10.49-11.66-18.35-11.66H0l20.98,44.63c3.34,7.11,10.49,11.65,18.35,11.65h29.51l-.9-.34Z"/></g></g></svg>
+  <div class="nav-tag">New Deal Handover</div>
+</nav>
+
+<div class="progress-bar-wrap" id="progress-nav">
+  <div class="progress-step active"><span class="step-num">1</span> Client Info</div>
+  <div class="progress-step"><span class="step-num">2</span> Agora & Portal</div>
+  <div class="progress-step"><span class="step-num">3</span> Contract & Pricing</div>
+  <div class="progress-step"><span class="step-num">4</span> Documents</div>
+  <div class="progress-step"><span class="step-num">5</span> Client Context</div>
+  <div class="progress-step"><span class="step-num">6</span> Review & Submit</div>
+</div>
+
+<div class="container">
+
+  <!-- PAGE 1: CLIENT INFO -->
+  <div class="page active" id="page-0">
+    <div class="page-eyebrow">Step 1 of 6</div>
+    <h1 class="page-title">Client Information</h1>
+    <p class="page-sub">Basic deal and contact details. Pull these from the HubSpot deal record.</p>
+
+    <div class="section-card">
+      <div class="section-card-title">Deal Details</div>
+
+      <div class="field-row-2">
+        <div class="field">
+          <label>Entity Name <span class="req">*</span></label>
+          <input type="text" id="entity_name" placeholder="e.g. TRA Investments LLC">
+        </div>
+        <div class="field">
+          <label>Client #</label>
+          <input type="text" id="client_num" placeholder="e.g. VV-2026-041">
+          <div class="field-hint">Internal client number if assigned</div>
+        </div>
+      </div>
+
+      <div class="field-row-2">
+        <div class="field">
+          <label>Entity Type <span class="req">*</span></label>
+          <select id="entity_type">
+            <option value="">Select...</option>
+            <option>Greenfield</option>
+            <option>Brownfield</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Fund Type</label>
+          <select id="fund_type">
+            <option value="">Select...</option>
+            <option>New Fund</option>
+            <option>Fund Conversion</option>
+            <option>N/A</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field-row-2">
+        <div class="field">
+          <label>Service <span class="req">*</span></label>
+          <select id="service">
+            <option value="">Select...</option>
+            <option>Full Fund Admin</option>
+            <option>Investor Servicing Only</option>
+            <option>Annual Financial Statements</option>
+            <option>AIP</option>
+            <option>Fund Financial Model</option>
+            <option>Investor Onboarding Support</option>
+            <option>Syndication Admin</option>
+            <option>Syndication Investor Support Services</option>
+            <option>Valuation Services</option>
+            <option>X Hr Engagements</option>
+            <option>Upsell</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Engagement</label>
+          <select id="engagement">
+            <option value="">Select...</option>
+            <option>5 Hour</option>
+            <option>10 Hour</option>
+            <option value="Other (Please state in special terms)">Other</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field-row-2">
+        <div class="field">
+          <label>Syndication Type</label>
+          <select id="syndication_type">
+            <option value="">Select...</option>
+            <option>New Syndication</option>
+            <option>Existing Syndication</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Onboarding Fee Amount</label>
+          <input type="number" id="onboarding_fee" placeholder="e.g. 5000" step="0.01">
+        </div>
+      </div>
+
+      <div class="field">
+        <label>HubSpot Deal Link</label>
+        <input type="url" id="hubspot_link" placeholder="https://app.hubspot.com/contacts/...">
+      </div>
+    </div>
+
+    <div class="section-card">
+      <div class="section-card-title">Primary Contact</div>
+
+      <div class="field-row-2">
+        <div class="field">
+          <label>Contact Name <span class="req">*</span></label>
+          <input type="text" id="contact_name" placeholder="Full name">
+        </div>
+        <div class="field">
+          <label>Contact Email</label>
+          <input type="email" id="contact_email" placeholder="email@example.com">
+        </div>
+      </div>
+
+      <div class="field-row-2">
+        <div class="field">
+          <label>Contact Number</label>
+          <input type="tel" id="contact_number" placeholder="(555) 000-0000">
+        </div>
+        <div class="field">
+          <label>Referral Source</label>
+          <input type="text" id="referral_source" placeholder="e.g. Existing client — John Smith">
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Address</label>
+        <input type="text" id="address" placeholder="City, State">
+      </div>
+    </div>
+
+    <div class="nav-row">
+      <button class="btn btn-primary" onclick="nextPage(0)">Next: Agora & Portal →</button>
+    </div>
+  </div>
+
+  <!-- PAGE 2: AGORA & PORTAL -->
+  <div class="page" id="page-1">
+    <div class="page-eyebrow">Step 2 of 6</div>
+    <h1 class="page-title">Agora & Portal</h1>
+    <p class="page-sub">Capture everything discussed about the investor portal during the sales process.</p>
+
+    <div class="section-card">
+      <div class="section-card-title">Portal Configuration</div>
+
+      <div class="field">
+        <label>Portal Type</label>
+        <select id="portal_type">
+          <option value="">Select...</option>
+          <option>Agora</option>
+          <option>Appfolio</option>
+          <option>Juniper Square</option>
+          <option>Other</option>
+          <option>Not Applicable</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Do they need Verivest to set up their portal? <span class="req">*</span></label>
+        <div class="radio-group">
+          <label class="radio-opt"><input type="radio" name="portal_setup" value="Yes"> Yes</label>
+          <label class="radio-opt"><input type="radio" name="portal_setup" value="No"> No</label>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Are they migrating from another portal? <span class="req">*</span></label>
+        <div class="radio-group">
+          <label class="radio-opt"><input type="radio" name="portal_migrate" value="Yes"> Yes</label>
+          <label class="radio-opt"><input type="radio" name="portal_migrate" value="No"> No</label>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Does the setup include migrating historical investor data? <span class="req">*</span></label>
+        <div class="radio-group">
+          <label class="radio-opt"><input type="radio" name="data_migrate" value="Yes"> Yes</label>
+          <label class="radio-opt"><input type="radio" name="data_migrate" value="No"> No</label>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>What is the scope of services for the portal setup?</label>
+        <div class="field-hint" style="margin-bottom:6px;">Required if any portal setup or migration is Yes above. What was specifically discussed and promised?</div>
+        <textarea id="portal_scope" class="tall" placeholder="Describe exactly what was agreed — document mapping, profile creation, data migration source, investor count, etc."></textarea>
+      </div>
+    </div>
+
+    <div class="nav-row">
+      <button class="btn btn-primary" onclick="nextPage(1)">Next: Contract & Pricing →</button>
+      <button class="btn btn-ghost" onclick="prevPage(1)">Back</button>
+    </div>
+  </div>
+
+  <!-- PAGE 3: CONTRACT & PRICING -->
+  <div class="page" id="page-2">
+    <div class="page-eyebrow">Step 3 of 6</div>
+    <h1 class="page-title">Contract & Pricing</h1>
+    <p class="page-sub">Capture any terms, fees, or commitments that differ from standard — or confirm that everything is standard.</p>
+
+    <div class="section-card">
+      <div class="section-card-title">Contract Terms</div>
+
+      <div class="field">
+        <label>Effective Date of First Accounting Period</label>
+        <div class="field-hint" style="margin-bottom:6px;">Required for brownfield clients. Best estimate for greenfield.</div>
+        <input type="date" id="effective_date">
+      </div>
+
+      <div class="field">
+        <label>Transaction Fees <span class="req">*</span></label>
+        <div class="radio-group">
+          <label class="radio-opt"><input type="radio" name="txn_fees" value="Standard"> Standard</label>
+          <label class="radio-opt"><input type="radio" name="txn_fees" value="Modified"> Modified</label>
+          <label class="radio-opt"><input type="radio" name="txn_fees" value="Waived"> Waived</label>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Transaction Fee Notes</label>
+        <div class="field-hint" style="margin-bottom:6px;">Required if Modified or Waived — explain why and what was agreed</div>
+        <textarea id="txn_fee_notes" placeholder="e.g. Fees waived for first 6 months as a concession due to brownfield complexity..."></textarea>
+      </div>
+
+      <div class="field">
+        <label>Non-Standard Contract Terms</label>
+        <div class="field-hint" style="margin-bottom:6px;">Any term that deviates from standard — fee structures, contract length, special provisions</div>
+        <textarea id="non_standard_terms" class="tall" placeholder="List any non-standard terms, or type 'None' if everything is standard..."></textarea>
+      </div>
+
+      <div class="field">
+        <label>Add-on Services Discussed</label>
+        <div class="field-hint" style="margin-bottom:6px;">List any add-ons discussed even if not on the contract — flag if discussed but not signed</div>
+        <input type="text" id="addon_services" placeholder="e.g. AIP discussed but not contracted, audit prep in scope">
+      </div>
+
+      <div class="field">
+        <label>Key Promises or Commitments Made <span class="req">*</span></label>
+        <div class="field-hint" style="margin-bottom:6px;">Anything the client was told to expect that goes beyond the contract — timelines, reports, deliverables</div>
+        <textarea id="key_promises" class="tall" placeholder="e.g. Promised first investor statement within 2 weeks of onboarding call..."></textarea>
+      </div>
+    </div>
+
+    <div class="nav-row">
+      <button class="btn btn-primary" onclick="nextPage(2)">Next: Documents →</button>
+      <button class="btn btn-ghost" onclick="prevPage(2)">Back</button>
+    </div>
+  </div>
+
+  <!-- PAGE 4: DOCUMENTS -->
+  <div class="page" id="page-3">
+    <div class="page-eyebrow">Step 4 of 6</div>
+    <h1 class="page-title">Documents</h1>
+    <p class="page-sub">Flag the status of each governing document Sales has collected. Onboarding uses this to know what needs to be re-requested from the client.</p>
+
+    <div class="section-card">
+      <div class="section-card-title">Document Status</div>
+      <table class="doc-table">
+        <thead><tr><th>Document</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>PPM</td><td><select id="doc_ppm"><option value="">Select...</option><option>Final</option><option>Draft</option><option>Unknown</option><option>Not Applicable</option></select></td></tr>
+          <tr><td>Operating Agreement</td><td><select id="doc_oa"><option value="">Select...</option><option>Final</option><option>Draft</option><option>Unknown</option><option>Not Applicable</option></select></td></tr>
+          <tr><td>Subscription Agreement</td><td><select id="doc_sub"><option value="">Select...</option><option>Final</option><option>Draft</option><option>Unknown</option><option>Not Applicable</option></select></td></tr>
+          <tr><td>Offering Memorandum / Pitch Deck</td><td><select id="doc_om"><option value="">Select...</option><option>Final</option><option>Draft</option><option>Unknown</option><option>Not Applicable</option></select></td></tr>
+          <tr><td>EIN / SS-4 Letter</td><td><select id="doc_ein"><option value="">Select...</option><option>Final</option><option>Draft</option><option>Unknown</option><option>Not Applicable</option></select></td></tr>
+          <tr><td>Financials (brownfield)</td><td><select id="doc_fin"><option value="">Select...</option><option>Final</option><option>Draft</option><option>Unknown</option><option>Not Applicable</option></select></td></tr>
+          <tr><td>Other (describe in notes)</td><td><select id="doc_other"><option value="">Select...</option><option>Final</option><option>Draft</option><option>Unknown</option><option>Not Applicable</option></select></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section-card">
+      <div class="section-card-title">Document Links</div>
+      <div class="field">
+        <label>Egnyte Folder URL</label>
+        <input type="url" id="egnyte_url" placeholder="https://verivest.egnyte.com/...">
+      </div>
+      <div class="field">
+        <label>Notes on Documents</label>
+        <div class="field-hint" style="margin-bottom:6px;">Describe any "Other" documents above, or add context on document status</div>
+        <textarea id="doc_notes" placeholder="e.g. PPM is near-final draft — execution copy expected by end of week..."></textarea>
+      </div>
+    </div>
+
+    <div class="nav-row">
+      <button class="btn btn-primary" onclick="nextPage(3)">Next: Client Context →</button>
+      <button class="btn btn-ghost" onclick="prevPage(3)">Back</button>
+    </div>
+  </div>
+
+  <!-- PAGE 5: CLIENT CONTEXT -->
+  <div class="page" id="page-4">
+    <div class="page-eyebrow">Step 5 of 6</div>
+    <h1 class="page-title">Client Context</h1>
+    <p class="page-sub">This is the most important section. Onboarding reads this before their first client call — give them the full picture, not just the contract terms.</p>
+
+    <div class="section-card">
+      <div class="section-card-title">Client Background</div>
+
+      <div class="field">
+        <label>Client Sensitivities or Priority Flags <span class="req">*</span></label>
+        <div class="field-hint" style="margin-bottom:6px;">Known expectations, hot-button issues, or priority status Onboarding should know before first contact</div>
+        <textarea id="sensitivities" class="tall" placeholder="e.g. Client was frustrated with previous admin's responsiveness — expects same-day replies..."></textarea>
+      </div>
+
+      <div class="field">
+        <label>Other Information</label>
+        <div class="field-hint" style="margin-bottom:6px;">How responsive was the client during sales? Any informal context that wouldn't appear in the form above?</div>
+        <textarea id="other_info" class="tall" placeholder="e.g. Very responsive over email, less so by phone..."></textarea>
+      </div>
+
+      <div class="field">
+        <label>Notes</label>
+        <div class="field-hint" style="margin-bottom:6px;">Anything else Onboarding should know</div>
+        <textarea id="notes" placeholder="Additional context, references to prior conversations, anything that doesn't fit above..."></textarea>
+      </div>
+    </div>
+
+    <div class="nav-row">
+      <button class="btn btn-primary" onclick="nextPage(4)">Review & Submit →</button>
+      <button class="btn btn-ghost" onclick="prevPage(4)">Back</button>
+    </div>
+  </div>
+
+  <!-- PAGE 6: REVIEW & SUBMIT -->
+  <div class="page" id="page-5">
+    <div class="page-eyebrow">Step 6 of 6</div>
+    <h1 class="page-title">Review & Submit</h1>
+    <p class="page-sub">Check your answers before submitting. Claude will generate the handover brief and create the ClickUp task automatically.</p>
+
+    <div id="review-content"></div>
+
+    <div id="submit-section">
+      <div class="nav-row">
+        <button class="btn btn-primary" id="submit-btn" onclick="submitHandover()">Generate Brief & Create ClickUp Task →</button>
+        <button class="btn btn-ghost" onclick="prevPage(5)">Back</button>
+      </div>
+    </div>
+
+    <div id="generating-section" style="display:none;">
+      <div class="loading-row">
+        <div class="spinner"></div>
+        <span id="generating-label">Generating brief & creating ClickUp task...</span>
+      </div>
+    </div>
+
+    <div id="result-section" style="display:none;">
+      <div id="result-status"></div>
+      <div id="ai-output-wrap" style="display:none;">
+        <div class="ai-output-label">AI-Generated Handover Brief</div>
+        <div class="ai-output" id="ai-output"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<footer>Verivest · Sales → Onboarding Handover · Internal Use Only</footer>
+
+<script>
+const FIELD_IDS = {
+  client_num:'36f1e950-41fb-4dc2-83ea-8d47733b9140',entity_name:'bb138648-47cf-4396-ba92-da7d817d5b88',
+  effective_date:'b94b8698-45fc-4e48-8fc2-e1e1fef9a748',service:'a2679d68-36f7-48d0-b2a7-6a8936a0971f',
+  portal_type:'5a7b3846-1e4c-4c51-9010-1d8d76f53c69',portal_setup:'6e89e5d9-fa3c-4565-a8f3-a6dbb3cc4598',
+  portal_migrate:'b4ec6ca9-708f-47cc-93e3-418f10488050',data_migrate:'211a51e8-5f2c-4ee7-a130-f2d2185e7745',
+  portal_scope:'466a57b9-7720-47eb-818b-a995cc2a8cb5',non_standard:'480c61be-44ff-4da8-b363-122608ebd0db',
+  contact_name:'1c3f1756-4b96-402e-8e99-8a8c88ce462f',address:'aed2ac52-7d71-4ee1-9076-3395a631e00b',
+  contact_email:'5139d7e0-8d66-4d8a-998f-e03fcfd01bbd',contact_number:'56a8831d-4db0-4471-9a78-adc1d5dc07d1',
+  hubspot_link:'7cb2da26-21a0-4183-8002-6997951c10d8',onboarding_fee:'446dd842-e74e-4590-9016-a4fc0c5418f0',
+  entity_type:'1784ad52-61a2-49b2-a282-fdf1445dc5d3',fund_type:'a643dc72-33f0-4807-aef6-490b5be9ad94',
+  engagement:'0164673c-a6ee-4257-b5ab-826b878849fc',syndication_type:'28159443-31a5-4345-a1de-09a9009c5077',
+  notes:'24b8de25-bbb4-4b9f-ae73-1e9a7172655d',addon_services:'c248ce8e-b0de-4384-9740-3bf9131aa7ea',
+  key_promises:'d5b81a08-0089-48db-ac6d-c3988a5612d1',sensitivities:'96a32291-99a3-4861-b7b6-0232943537bd',
+  referral_source:'02255851-5e5d-458f-a12c-4b4b20987a4a',
+};
+
+document.querySelectorAll('.radio-opt').forEach(opt => {
+  opt.addEventListener('click', () => {
+    const name = opt.querySelector('input').name;
+    document.querySelectorAll(`.radio-opt input[name="${name}"]`).forEach(i => i.closest('.radio-opt').classList.remove('selected'));
+    opt.classList.add('selected');
+    opt.querySelector('input').checked = true;
+  });
+});
+
+const getVal = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+const getRadio = name => { const el = document.querySelector(`input[name="${name}"]:checked`); return el ? el.value : ''; };
+
+function nextPage(current) {
+  const errors = validatePage(current);
+  if (errors.length) { alert('Please fill in required fields:\n\n' + errors.join('\n')); return; }
+  goToPage(current + 1);
+}
+function prevPage(current) { goToPage(current - 1); }
+
+function goToPage(idx) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-' + idx).classList.add('active');
+  document.querySelectorAll('.progress-step').forEach((s, i) => {
+    s.classList.remove('active','done');
+    if (i < idx) s.classList.add('done');
+    else if (i === idx) s.classList.add('active');
+  });
+  if (idx === 5) buildReview();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function validatePage(idx) {
+  const e = [];
+  if (idx === 0) {
+    if (!getVal('entity_name')) e.push('• Entity Name is required');
+    if (!getVal('entity_type')) e.push('• Entity Type is required');
+    if (!getVal('service')) e.push('• Service is required');
+    if (!getVal('contact_name')) e.push('• Contact Name is required');
+  }
+  if (idx === 2) {
+    if (!getRadio('txn_fees')) e.push('• Transaction Fees selection is required');
+    if (!getVal('key_promises')) e.push('• Key Promises or Commitments Made is required');
+  }
+  if (idx === 4) {
+    if (!getVal('sensitivities')) e.push('• Client Sensitivities or Priority Flags is required');
+  }
+  return e;
+}
+
+function buildReview() {
+  const docStatus = [['PPM',getVal('doc_ppm')],['Operating Agreement',getVal('doc_oa')],['Subscription Agreement',getVal('doc_sub')],
+    ['Offering Memo',getVal('doc_om')],['EIN / SS-4',getVal('doc_ein')],['Financials',getVal('doc_fin')],['Other',getVal('doc_other')]]
+    .filter(d=>d[1]).map(d=>`${d[0]}: ${d[1]}`).join(' | ');
+
+  const sections = [
+    { title:'Client Information', rows:[['Entity Name',getVal('entity_name')],['Client #',getVal('client_num')],['Entity Type',getVal('entity_type')],['Fund Type',getVal('fund_type')],['Service',getVal('service')],['Engagement',getVal('engagement')],['Syndication Type',getVal('syndication_type')],['Onboarding Fee',getVal('onboarding_fee')? '$'+Number(getVal('onboarding_fee')).toLocaleString():''],['HubSpot Link',getVal('hubspot_link')],['Contact Name',getVal('contact_name')],['Contact Email',getVal('contact_email')],['Contact Number',getVal('contact_number')],['Address',getVal('address')],['Referral Source',getVal('referral_source')]] },
+    { title:'Agora & Portal', rows:[['Portal Type',getVal('portal_type')],['Verivest to set up portal?',getRadio('portal_setup')],['Migrating from another portal?',getRadio('portal_migrate')],['Historical data migration?',getRadio('data_migrate')],['Portal setup scope',getVal('portal_scope')]] },
+    { title:'Contract & Pricing', rows:[['Effective Date',getVal('effective_date')],['Transaction Fees',getRadio('txn_fees')],['Fee Notes',getVal('txn_fee_notes')],['Non-Standard Terms',getVal('non_standard_terms')],['Add-on Services',getVal('addon_services')],['Key Promises',getVal('key_promises')]] },
+    { title:'Documents', rows:[['Document Status',docStatus||'Not specified'],['Egnyte Folder',getVal('egnyte_url')],['Document Notes',getVal('doc_notes')]] },
+    { title:'Client Context', rows:[['Sensitivities / Flags',getVal('sensitivities')],['Other Information',getVal('other_info')],['Notes',getVal('notes')]] }
+  ];
+
+  document.getElementById('review-content').innerHTML = sections.map(s => `
+    <div class="review-section">
+      <div class="review-section-header">${s.title}</div>
+      ${s.rows.filter(r=>r[1]).map(r=>`<div class="review-row"><span class="review-label">${r[0]}</span><span class="review-value">${r[1]}</span></div>`).join('')}
+    </div>`).join('');
+}
+
+function compileFormData() {
+  const docStatus = [['PPM',getVal('doc_ppm')],['Operating Agreement',getVal('doc_oa')],['Subscription Agreement',getVal('doc_sub')],
+    ['Offering Memorandum / Pitch Deck',getVal('doc_om')],['EIN / SS-4 Letter',getVal('doc_ein')],['Financials (brownfield)',getVal('doc_fin')],['Other',getVal('doc_other')]]
+    .filter(d=>d[1]).map(d=>`${d[0]}: ${d[1]}`).join('\n');
+  return `ENTITY NAME: ${getVal('entity_name')}
+CLIENT #: ${getVal('client_num')||'Not assigned'}
+ENTITY TYPE: ${getVal('entity_type')}
+FUND TYPE: ${getVal('fund_type')||'Not specified'}
+SERVICE: ${getVal('service')}
+ENGAGEMENT: ${getVal('engagement')||'Not specified'}
+SYNDICATION TYPE: ${getVal('syndication_type')||'Not specified'}
+ONBOARDING FEE: ${getVal('onboarding_fee')? '$'+Number(getVal('onboarding_fee')).toLocaleString() : 'Not specified'}
+HUBSPOT LINK: ${getVal('hubspot_link')||'Not provided'}
+CONTACT NAME: ${getVal('contact_name')}
+CONTACT EMAIL: ${getVal('contact_email')||'Not provided'}
+CONTACT NUMBER: ${getVal('contact_number')||'Not provided'}
+ADDRESS: ${getVal('address')||'Not provided'}
+REFERRAL SOURCE: ${getVal('referral_source')||'Not specified'}
+PORTAL TYPE: ${getVal('portal_type')||'Not specified'}
+VERIVEST TO SET UP PORTAL: ${getRadio('portal_setup')||'Not specified'}
+MIGRATING FROM ANOTHER PORTAL: ${getRadio('portal_migrate')||'Not specified'}
+HISTORICAL DATA MIGRATION: ${getRadio('data_migrate')||'Not specified'}
+PORTAL SETUP SCOPE: ${getVal('portal_scope')||'Not specified'}
+EFFECTIVE DATE OF FIRST PERIOD: ${getVal('effective_date')||'Not specified'}
+TRANSACTION FEES: ${getRadio('txn_fees')||'Not specified'}
+TRANSACTION FEE NOTES: ${getVal('txn_fee_notes')||'None'}
+NON-STANDARD CONTRACT TERMS: ${getVal('non_standard_terms')||'None'}
+ADD-ON SERVICES DISCUSSED: ${getVal('addon_services')||'None'}
+KEY PROMISES OR COMMITMENTS MADE: ${getVal('key_promises')||'None noted'}
+DOCUMENT STATUS:\n${docStatus||'Not specified'}
+EGNYTE FOLDER: ${getVal('egnyte_url')||'Not provided'}
+DOCUMENT NOTES: ${getVal('doc_notes')||'None'}
+CLIENT SENSITIVITIES OR PRIORITY FLAGS: ${getVal('sensitivities')||'None noted'}
+OTHER INFORMATION: ${getVal('other_info')||'None'}
+NOTES: ${getVal('notes')||'None'}`.trim();
+}
+
+async function submitHandover() {
+  document.getElementById('submit-section').style.display='none';
+  document.getElementById('generating-section').style.display='block';
+  document.getElementById('result-section').style.display='none';
+  let aiOutput='';
+  try {
+    const customFields=[];
+    const addText=(id,v)=>{if(v) customFields.push({id,value:v});};
+    const addDD=(id,name,opts)=>{const o=opts.find(x=>x.name===name);if(o) customFields.push({id,value:o.id});};
+    addText(FIELD_IDS.client_num,getVal('client_num'));addText(FIELD_IDS.entity_name,getVal('entity_name'));
+    addText(FIELD_IDS.portal_scope,getVal('portal_scope'));addText(FIELD_IDS.non_standard,getVal('non_standard_terms'));
+    addText(FIELD_IDS.contact_name,getVal('contact_name'));addText(FIELD_IDS.address,getVal('address'));
+    addText(FIELD_IDS.contact_email,getVal('contact_email'));addText(FIELD_IDS.contact_number,getVal('contact_number'));
+    addText(FIELD_IDS.notes,[getVal('notes'),getVal('doc_notes'),getVal('other_info'),getVal('txn_fee_notes')].filter(Boolean).join('\n\n'));
+    addText(FIELD_IDS.addon_services,getVal('addon_services'));addText(FIELD_IDS.key_promises,getVal('key_promises'));
+    addText(FIELD_IDS.sensitivities,getVal('sensitivities'));addText(FIELD_IDS.referral_source,getVal('referral_source'));
+    if(getVal('hubspot_link')) customFields.push({id:FIELD_IDS.hubspot_link,value:getVal('hubspot_link')});
+    if(getVal('onboarding_fee')) customFields.push({id:FIELD_IDS.onboarding_fee,value:parseFloat(getVal('onboarding_fee'))});
+    if(getVal('effective_date')) customFields.push({id:FIELD_IDS.effective_date,value:new Date(getVal('effective_date')).getTime()});
+    addDD(FIELD_IDS.entity_type,getVal('entity_type'),[{id:'92a303ba-e1b4-4b38-810b-7afa96341fc3',name:'Greenfield'},{id:'c556aaae-2cf5-4b58-8f34-89846f86e02f',name:'Brownfield'}]);
+    addDD(FIELD_IDS.portal_type,getVal('portal_type'),[{id:'710dd7b4-6ff3-4e88-8324-7a0ae6f8e924',name:'Agora'},{id:'98c75f03-042d-48e5-8b82-fd00ec9362a2',name:'Appfolio'},{id:'d8cb8b6b-62d5-4ba8-9010-ebb679ec45f5',name:'Juniper Square'},{id:'278dc429-b73f-4270-b929-9a847a52b3cd',name:'Other'},{id:'ea605bfe-dab7-4a68-ae27-4f1b07f1a940',name:'Not Applicable'}]);
+    addDD(FIELD_IDS.portal_setup,getRadio('portal_setup'),[{id:'0ca0fa8c-6b9c-40b1-ae92-4967847a7c58',name:'Yes'},{id:'0813e003-e657-4f05-8112-ebb6aa85ddf5',name:'No'}]);
+    addDD(FIELD_IDS.portal_migrate,getRadio('portal_migrate'),[{id:'096b6ef1-533f-40a3-bcf7-1f0d626a3226',name:'Yes'},{id:'9d72ecaa-4cd3-461e-861d-8e36f8cf689c',name:'No'}]);
+    addDD(FIELD_IDS.data_migrate,getRadio('data_migrate'),[{id:'91f52642-3aba-45ec-9e19-df406f2090f9',name:'Yes'},{id:'821aa0b6-f1e1-4da9-abff-bf00d08a8852',name:'No'}]);
+    addDD(FIELD_IDS.fund_type,getVal('fund_type'),[{id:'14a581bb-7715-4837-b68f-03799ab32364',name:'New Fund'},{id:'4a35a321-3846-4e30-9bc1-f0826f8aff09',name:'Fund Conversion'},{id:'e6872ce8-2ade-4fbe-97f4-441f4a83024c',name:'N/A'}]);
+    addDD(FIELD_IDS.engagement,getVal('engagement')==='Other'?'Other (Please state in special terms)':getVal('engagement'),[{id:'587f26e1-233e-4b66-906f-b9898a2fc1b7',name:'5 Hour'},{id:'4b4a517d-5438-4cd5-83e5-8121dd2ffe14',name:'10 Hour'},{id:'90be4ff6-d714-472a-ae02-a4dce430329d',name:'Other (Please state in special terms)'}]);
+    addDD(FIELD_IDS.syndication_type,getVal('syndication_type'),[{id:'2fe3a69c-5ba7-4706-a920-843e454440e8',name:'New Syndication'},{id:'e89792dc-aa85-4ce1-8467-5272cf37dfb1',name:'Existing Syndication'}]);
+    addDD(FIELD_IDS.service,getVal('service'),[{id:'8edb78ee-acad-4b93-a3dd-3adf0eb85139',name:'AIP'},{id:'77b990cc-e978-4181-b0cc-f3052b3e78b8',name:'Annual Financial Statements'},{id:'6eca78c9-682c-41a5-9a68-b411c597d4ec',name:'Full Fund Admin'},{id:'9cd144e5-d4fb-4b82-876c-f16177616e2a',name:'Fund Financial Model'},{id:'d02aee4b-bed2-4aac-8ca0-5f0656055737',name:'Investor Onboarding Support'},{id:'1126c97d-2bda-44a4-ba75-60637e888fa7',name:'Investor Servicing Only'},{id:'e077a088-95ae-4083-8ba0-3fb8e1b3a27d',name:'Syndication Admin'},{id:'61e4c46d-e1c2-4872-9a15-75d8e3eff360',name:'Syndication Investor Support Services'},{id:'5cc4e461-e174-495d-845a-e5f7b8f5802d',name:'Upsell'},{id:'a613b182-83b2-4a27-b26b-a8b6170b4d33',name:'Valuation Services'},{id:'4049361a-9c84-4c40-93d4-3f8146e5cbc7',name:'X Hr Engagements'}]);
+
+    const res = await fetch('/api/handover', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ formData:compileFormData(), entityName:getVal('entity_name'), customFields:customFields.filter(f=>f.value!==undefined&&f.value!=='') })
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Server error');
+    aiOutput = result.brief;
+    document.getElementById('generating-section').style.display='none';
+    document.getElementById('result-section').style.display='block';
+    document.getElementById('result-status').innerHTML=`<div class="status-box success"><strong>✓ Handover task created</strong><br>The brief has been generated and the ClickUp task is live in <strong>Pending Sales Review</strong>.<br><a href="${result.taskUrl}" target="_blank" class="clickup-link">↗ Open task in ClickUp</a></div>`;
+    document.getElementById('ai-output-wrap').style.display='block';
+    document.getElementById('ai-output').textContent=aiOutput;
+  } catch(err) {
+    document.getElementById('generating-section').style.display='none';
+    document.getElementById('result-section').style.display='block';
+    document.getElementById('result-status').innerHTML=`<div class="status-box error"><strong>Something went wrong.</strong><br>${err.message||'Unknown error'}</div>`;
+    if(aiOutput){document.getElementById('ai-output-wrap').style.display='block';document.getElementById('ai-output').textContent=aiOutput;document.getElementById('result-status').innerHTML+=`<div class="status-box warning" style="margin-top:8px;">Brief was generated but ClickUp task could not be created. Copy the brief above and create the task manually.</div>`;}
+  }
+}
+</script>
+</body>
+</html>
