@@ -35,7 +35,6 @@ BEFORE SECTION 1, output WARNING blocks if triggered:
 RULES: Never infer rates or fees. Tag every deal-specific detail to the fund it applies to. Missing fields: write exactly [MISSING — Sales to confirm before onboarding begins]. Section 4 is NOT optional. Tone: plain English, written for a colleague preparing for a first client call.`;
 
 export default async function handler(req, res) {
-  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -51,7 +50,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { formData, customFields } = req.body;
+    const { formData, customFields, entityName } = req.body;
 
     // Step 1: Generate brief with Claude
     const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
@@ -72,11 +71,10 @@ export default async function handler(req, res) {
     const anthropicData = await anthropicRes.json();
     if (anthropicData.error) throw new Error('Anthropic error: ' + anthropicData.error.message);
     const brief = (anthropicData.content || []).map(b => b.text || '').join('').trim();
-
     if (!brief) throw new Error('No response from Claude — raw: ' + JSON.stringify(anthropicData));
 
-    // Step 2: Create ClickUp task
-    const taskName = `${req.body.entityName} — Sales Handover`;
+    // Step 2: Create ClickUp task (no custom fields in initial creation)
+    const taskName = `${entityName} — Sales Handover`;
 
     const clickupRes = await fetch(`https://api.clickup.com/api/v2/list/${CLICKUP_LIST}/task`, {
       method: 'POST',
@@ -87,19 +85,35 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         name: taskName,
         description: brief,
-        status: 'pending sales review',
-        custom_fields: customFields.filter(f => f.value !== undefined && f.value !== '')
+        status: 'pending sales review'
       })
     });
 
     const clickupData = await clickupRes.json();
-
     if (!clickupData.id) throw new Error(clickupData.err || 'ClickUp task creation failed');
+
+    const taskId = clickupData.id;
+
+    // Step 3: Update each custom field individually — failures are non-blocking
+    const validFields = (customFields || []).filter(f => f.value !== undefined && f.value !== '' && f.value !== null);
+
+    await Promise.allSettled(
+      validFields.map(field =>
+        fetch(`https://api.clickup.com/api/v2/task/${taskId}/field/${field.id}`, {
+          method: 'POST',
+          headers: {
+            'Authorization': CLICKUP_KEY,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ value: field.value })
+        })
+      )
+    );
 
     return res.status(200).json({
       brief,
-      taskId: clickupData.id,
-      taskUrl: `https://app.clickup.com/t/${clickupData.id}`
+      taskId,
+      taskUrl: `https://app.clickup.com/t/${taskId}`
     });
 
   } catch (err) {
