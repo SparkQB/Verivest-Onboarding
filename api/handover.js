@@ -74,7 +74,7 @@ export default async function handler(req, res) {
     if (!brief) throw new Error('No response from Claude — raw: ' + JSON.stringify(anthropicData));
 
     // Step 2: Create ClickUp task (no custom fields in initial creation)
-    const taskName = `${entityName} — Sales Handover`;
+    const taskName = entityName;
 
     const clickupRes = await fetch(`https://api.clickup.com/api/v2/list/${CLICKUP_LIST}/task`, {
       method: 'POST',
