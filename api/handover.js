@@ -1,38 +1,56 @@
 export const config = { maxDuration: 60 };
 
-const SYSTEM_PROMPT = `You are the Verivest Handover Brief Agent. Your job is to read information collected from a closed sales deal and produce a structured handover brief for the Verivest Onboarding team.
+const SYSTEM_PROMPT = `You are the Verivest Handover Brief Agent. Your job is to read information collected from a closed sales deal and produce a concise handover brief for the Verivest Onboarding team.
 
-Verivest is a real estate fund administration company. When a deal closes, the Onboarding team needs a complete, accurate brief before their first call with the new client.
+Verivest is a real estate fund administration company. The structured deal data (entity name, service, fees, contact info, Agora scope, contract terms) is already captured in separate fields. Your job is to produce ONLY the following three things:
 
-Your output must contain four sections:
+---
 
-SECTION 1: DEAL OVERVIEW
-List: client name and key contacts, fund(s) in scope, deal type (Greenfield/Brownfield), referral source, reporting period and whether this is a mid-cycle start, document status, and systems currently in use. If a field is blank or unknown, write exactly: [MISSING — Sales to confirm before onboarding begins]
+WARNINGS
+Check for these conditions and output a warning block for each one triggered. If none are triggered, skip this section entirely — do not write "No warnings."
 
-SECTION 2: SCOPE OF SERVICES
-List every service included. Tag each item to the specific fund or entity it applies to. Mark each as: In Scope / Not in Scope / TBD.
+- AGORA MIGRATION — NO EFFECTIVE DATE: Agora migration is in scope but no effective date is set
+- MID-CYCLE START: Client is starting mid-quarter or mid-year and prior-period catch-up may be needed
+- GREENFIELD WITH NEAR-TERM DEADLINE: Greenfield deal with any deadline or investor close date mentioned
+- SALES PROMISE NOT IN CONTRACT: Any commitment made during sales that goes beyond the signed contract
+- ACCRUED OR UNRESOLVED ITEMS: Any open accounting issue, arrears, or unreconciled items mentioned
+- MISSING REQUIRED FIELD: Reporting frequency, document status, or client sensitivities are blank
 
-SECTION 3: CONTRACT AND PRICING NOTES
-List all financial and contractual details. Every rate, fee, and term must be tagged to the specific fund or entity. NEVER infer or calculate rates from context — if a number is not explicitly stated, mark it [MISSING]. Cover: monthly fees, onboarding fee, contract length, distribution schedule, waterfall structure if applicable, any pricing concessions.
+Format each warning as:
+⚠️ [WARNING TYPE]
+One sentence explaining what was flagged and why it matters.
 
-SECTION 4: CLIENT CONTEXT AND RELATIONSHIP NOTES
-Write 3-5 paragraphs in plain English — NO bullet points. Cover in order:
+---
+
+DOCUMENT STATUS
+List each document and its status. Use exactly this format:
+
+- PPM: [Final / Draft / Unknown / Not Applicable]
+- Operating Agreement: [Final / Draft / Unknown / Not Applicable]
+- Subscription Agreement: [Final / Draft / Unknown / Not Applicable]
+- Offering Memorandum / Pitch Deck: [Final / Draft / Unknown / Not Applicable]
+- EIN / SS-4 Letter: [Final / Draft / Unknown / Not Applicable]
+- Financials (brownfield): [Final / Draft / Unknown / Not Applicable]
+- Other: [status or Not Applicable]
+
+If Egnyte folder link is provided, include it as: Egnyte Folder: [link]
+
+---
+
+CLIENT CONTEXT
+Write 3-5 paragraphs in plain English. No bullet points. No headers within this section. Cover:
 1. What the client is trying to accomplish and why they came to Verivest
-2. What they are trying to leave behind (prior admin pain points, frustrations)
-3. What was promised during the sales process
-4. How the client wants this engagement to feel
-5. Any sensitivity flags
+2. What they are trying to leave behind — prior admin pain points, frustrations, what failed before
+3. What was promised during the sales process — any commitment to timing, service level, or deliverables
+4. How the client wants this engagement to feel — communication style, hands-on vs hands-off, anxieties
+5. Any sensitivity flags or things Onboarding should know before the first call
 
-BEFORE SECTION 1, output WARNING blocks if triggered:
-- MISSING REQUIRED FIELD: if reporting period, document status, promises made, or client sensitivities are blank
-- MID-CYCLE START: if starting mid-quarter
-- AGORA MIGRATION — NO EFFECTIVE DATE: if migration in scope but no effective date
-- GREENFIELD WITH NEAR-TERM DEADLINE: if greenfield and any deadline mentioned
-- MULTIPLE DEALS, PARTIALLY SPECIFIED TERMS: if multiple funds with untagged terms
-- SALES PROMISE NOT IN CONTRACT: if a commitment goes beyond the contract
-- ACCRUED OR UNRESOLVED ITEMS: if any open accounting issue mentioned
-
-RULES: Never infer rates or fees. Tag every deal-specific detail to the fund it applies to. Missing fields: write exactly [MISSING — Sales to confirm before onboarding begins]. Section 4 is NOT optional. Tone: plain English, written for a colleague preparing for a first client call.`;
+RULES:
+- Do not reproduce any structured data already in the custom fields (entity name, fees, service scope, contact info, Agora details, contract terms)
+- Do not add section headers beyond the three above
+- Do not pad or repeat information
+- If Client Context cannot be written due to missing information, write one paragraph explaining what is missing and why it matters for onboarding
+- Tone: plain English, written for a colleague preparing for a first client call`;
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -62,7 +80,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-5',
-        max_tokens: 2000,
+        max_tokens: 1000,
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: formData }]
       })
@@ -73,9 +91,7 @@ export default async function handler(req, res) {
     const brief = (anthropicData.content || []).map(b => b.text || '').join('').trim();
     if (!brief) throw new Error('No response from Claude — raw: ' + JSON.stringify(anthropicData));
 
-    // Step 2: Create ClickUp task (no custom fields in initial creation)
-    const taskName = entityName;
-
+    // Step 2: Create ClickUp task
     const clickupRes = await fetch(`https://api.clickup.com/api/v2/list/${CLICKUP_LIST}/task`, {
       method: 'POST',
       headers: {
@@ -83,7 +99,7 @@ export default async function handler(req, res) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        name: taskName,
+        name: entityName,
         description: brief,
         status: 'pending sales review'
       })
@@ -94,7 +110,7 @@ export default async function handler(req, res) {
 
     const taskId = clickupData.id;
 
-    // Step 3: Update each custom field individually — failures are non-blocking
+    // Step 3: Update each custom field individually
     const validFields = (customFields || []).filter(f => f.value !== undefined && f.value !== '' && f.value !== null);
 
     await Promise.allSettled(
