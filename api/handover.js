@@ -62,7 +62,7 @@ export default async function handler(req, res) {
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-5',
         max_tokens: 2000,
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: formData }]
@@ -70,9 +70,10 @@ export default async function handler(req, res) {
     });
 
     const anthropicData = await anthropicRes.json();
+    if (anthropicData.error) throw new Error('Anthropic error: ' + anthropicData.error.message);
     const brief = (anthropicData.content || []).map(b => b.text || '').join('').trim();
 
-    if (!brief) throw new Error('No response from Claude');
+    if (!brief) throw new Error('No response from Claude — raw: ' + JSON.stringify(anthropicData));
 
     // Step 2: Create ClickUp task
     const taskName = `${req.body.entityName} — Sales Handover`;
