@@ -2,7 +2,16 @@
   "functions": {
     "api/handover.js": {
       "maxDuration": 300
+    },
+    "api/cleanup.js": {
+      "maxDuration": 60
     }
   },
-  "outputDirectory": "public"
+  "outputDirectory": "public",
+  "crons": [
+    {
+      "path": "/api/cleanup",
+      "schedule": "0 9 1,16 * *"
+    }
+  ]
 }
