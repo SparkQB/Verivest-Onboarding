@@ -148,8 +148,7 @@ footer { border-top:1px solid var(--border); text-align:center; padding:22px; fo
   <div class="progress-step"><span class="step-num">3</span> Contract & Pricing</div>
   <div class="progress-step"><span class="step-num">4</span> Documents</div>
   <div class="progress-step"><span class="step-num">5</span> Client Context</div>
-  <div class="progress-step"><span class="step-num">6</span> Upload Files</div>
-  <div class="progress-step"><span class="step-num">7</span> Review & Submit</div>
+  <div class="progress-step"><span class="step-num">6</span> Review & Submit</div>
 </div>
 
 <div class="container">
@@ -397,7 +396,7 @@ footer { border-top:1px solid var(--border); text-align:center; padding:22px; fo
   <!-- PAGE 4: DOCUMENTS -->
   <div class="page" id="page-3">
     <div class="page-eyebrow">Step 4 of 6</div>
-    <h1 class="page-title">Documents</h1>
+    <h1 class="page-title">Documents & Files</h1>
     <p class="page-sub">Flag the status of each governing document Sales has collected. Onboarding uses this to know what needs to be re-requested from the client.</p>
 
     <div class="section-card">
@@ -427,6 +426,18 @@ footer { border-top:1px solid var(--border); text-align:center; padding:22px; fo
         <div class="field-hint" style="margin-bottom:6px;">Describe any "Other" documents above, or add context on document status</div>
         <textarea id="doc_notes" placeholder="e.g. PPM is near-final draft — execution copy expected by end of week..."></textarea>
       </div>
+    </div>
+
+    <div class="section-card">
+      <div class="section-card-title">Upload Files</div>
+      <p style="font-size:13px;color:#6b7280;margin-bottom:14px;line-height:1.6;">Upload call transcripts, contracts, PPMs, financial statements — anything relevant. Claude will read everything and surface details Onboarding and Accounting need. Optional.</p>
+      <div id="upload-drop-zone" style="border:2px dashed rgba(248,88,80,0.3);border-radius:5px;padding:32px 24px;text-align:center;cursor:pointer;transition:all 0.2s;background:#fafaf7;" onclick="document.getElementById('file-input').click()" ondragover="event.preventDefault();this.style.borderColor='#f85850'" ondragleave="this.style.borderColor='rgba(248,88,80,0.3)'" ondrop="handleDrop(event)">
+        <div style="font-size:28px;margin-bottom:10px;">📄</div>
+        <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:4px;">Drop files here or click to browse</div>
+        <div style="font-size:12px;color:#6b7280;">PDF, DOCX, PPTX, XLSX, CSV, TXT</div>
+        <input type="file" id="file-input" multiple accept=".pdf,.docx,.pptx,.xlsx,.xls,.csv,.txt" style="display:none" onchange="handleFiles(this.files)">
+      </div>
+      <div id="file-list" style="margin-top:12px;"></div>
     </div>
 
     <div class="nav-row">
@@ -464,40 +475,14 @@ footer { border-top:1px solid var(--border); text-align:center; padding:22px; fo
     </div>
 
     <div class="nav-row">
-      <button class="btn btn-primary" onclick="nextPage(4)">Next: Upload Files →</button>
+      <button class="btn btn-primary" onclick="nextPage(4)">Review & Submit →</button>
       <button class="btn btn-ghost" onclick="prevPage(4)">Back</button>
     </div>
   </div>
 
-  <!-- PAGE 6: UPLOAD FILES -->
-  <div class="page" id="page-6">
-    <div class="page-eyebrow">Step 6 of 7</div>
-    <h1 class="page-title">Upload Files</h1>
-    <p class="page-sub">Upload any relevant documents — call transcripts, contracts, PPMs, financial statements. Claude will read everything and surface details Onboarding and Accounting need.</p>
-
-    <div class="section-card">
-      <div class="section-card-title">Documents</div>
-
-      <div id="upload-drop-zone" style="border:2px dashed rgba(248,88,80,0.3);border-radius:5px;padding:40px 24px;text-align:center;cursor:pointer;transition:all 0.2s;background:#fafaf7;" onclick="document.getElementById('file-input').click()" ondragover="event.preventDefault();this.style.borderColor='#f85850'" ondragleave="this.style.borderColor='rgba(248,88,80,0.3)'" ondrop="handleDrop(event)">
-        <div style="font-size:32px;margin-bottom:12px;">📄</div>
-        <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:6px;">Drop files here or click to browse</div>
-        <div style="font-size:12px;color:#6b7280;">PDF, DOCX, PPTX, XLSX, CSV, TXT — no limit on number of files</div>
-        <input type="file" id="file-input" multiple accept=".pdf,.docx,.pptx,.xlsx,.xls,.csv,.txt" style="display:none" onchange="handleFiles(this.files)">
-      </div>
-
-      <div id="file-list" style="margin-top:16px;"></div>
-      <div id="upload-progress" style="margin-top:12px;font-size:13px;color:#6b7280;display:none;"></div>
-    </div>
-
-    <div class="nav-row">
-      <button class="btn btn-primary" onclick="nextPage(5)">Review & Submit →</button>
-      <button class="btn btn-ghost" onclick="prevPage(5)">Back</button>
-    </div>
-  </div>
-
-  <!-- PAGE 7: REVIEW & SUBMIT -->
+  <!-- PAGE 6: REVIEW & SUBMIT -->
   <div class="page" id="page-5">
-    <div class="page-eyebrow">Step 7 of 7</div>
+    <div class="page-eyebrow">Step 6 of 6</div>
     <h1 class="page-title">Review & Submit</h1>
     <p class="page-sub">Check your answers before submitting. Claude will generate the handover brief and create the ClickUp task automatically.</p>
 
@@ -632,7 +617,7 @@ function goToPage(idx) {
     if (i < idx) s.classList.add('done');
     else if (i === idx) s.classList.add('active');
   });
-  if (idx === 6) buildReview();
+  if (idx === 5) buildReview();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
