@@ -47,19 +47,31 @@ If uploaded documents were provided, list them here as: Uploaded Documents: [fil
 ---
 
 CLIENT CONTEXT
-Write 3-5 paragraphs in plain English drawing on ALL available sources — form fields, call transcripts, contracts, and any other uploaded documents. No bullet points. No headers within this section. Cover:
-1. What the client is trying to accomplish and why they came to Verivest — use transcript content if available
-2. What they are trying to leave behind — prior admin pain points, frustrations, what failed before — transcripts are the best source for this
-3. What was promised during the sales process — check transcripts carefully for verbal commitments that may not be in the form
-4. How the client wants this engagement to feel — communication style, hands-on vs hands-off, anxieties — pull from transcript tone and language
-5. Any sensitivity flags, accounting nuances, or things Onboarding should flag for Accounting before the first call
+Call transcripts will almost always be uploaded. They are your primary source. The form fields are a starting point — the transcripts are the truth. Write 3-5 paragraphs in plain English. No bullet points. No headers within this section.
+
+Cover the following, pulling from transcripts first and form fields second:
+
+1. WHAT THE CLIENT IS TRYING TO ACCOMPLISH
+Why did they come to Verivest? What problem are they solving? What does success look like for them? Pull the client's own words and framing from transcripts where possible.
+
+2. WHAT THEY ARE LEAVING BEHIND
+What failed with their prior admin, accountant, or internal process? What frustrated them? What do they never want to experience again? Transcripts are the best source for this — clients often say things on calls they don't write in forms.
+
+3. PROMISES AND COMMITMENTS MADE
+This is critical. Read every transcript carefully for any commitment made by the Verivest Sales rep — verbal promises about timelines, turnaround times, specific deliverables, pricing, service inclusions, or anything that starts with "we'll", "we can", "I'll make sure", "you'll have", "we'll take care of", "don't worry about". These verbal commitments are the most common source of onboarding friction. If the form field says "none" but the transcripts contain commitments, the transcripts win. List every commitment you find, attributed to which call it came from.
+
+4. HOW THE CLIENT WANTS THIS TO FEEL
+Communication style, responsiveness expectations, how hands-on they expect to be in the early months, what makes them anxious. Read the tone of the transcripts — is the client rushed? Skeptical? Excited? Detail-oriented? That tone tells Onboarding how to show up.
+
+5. SENSITIVITY FLAGS AND ACCOUNTING NUANCES
+Anything Onboarding should know before the first call that isn't obvious from the form. This includes things the client mentioned only in passing, accounting complexity found in documents, investor dynamics, timeline pressures, or anything that would change how Onboarding prepares.
 
 RULES:
-- Draw on uploaded documents actively — do not just summarize the form if richer context exists in transcripts or contracts
-- Flag anything in documents that Sales might not have thought to mention but that Onboarding or Accounting needs
-- Do not reproduce structured data already in the ClickUp fields
-- Do not pad or repeat information
-- Tone: plain English, written for a colleague preparing for a first client call`;
+- Transcripts are always the primary source. If a transcript contradicts the form, note both and flag the discrepancy.
+- Never invent commitments. Only flag what is explicitly stated in the transcripts or form.
+- Do not reproduce structured data already in the ClickUp fields.
+- Do not pad or repeat information.
+- Tone: plain English, written for a colleague preparing for a first client call.`;
 
 async function extractText(buffer, filename) {
   const ext = filename.split('.').pop().toLowerCase();
@@ -167,7 +179,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-5',
-        max_tokens: 2000,
+        max_tokens: 3000,
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: fullInput }]
       })
