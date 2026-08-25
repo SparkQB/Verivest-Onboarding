@@ -83,6 +83,14 @@ Communication style, responsiveness expectations, hands-on vs hands-off preferen
 5. SENSITIVITY FLAGS
 Anything Onboarding should know before the first call not obvious from the form — things mentioned in passing, investor dynamics, timeline pressures, relationship context.
 
+After the CLIENT CONTEXT section, always append this section:
+
+---
+
+EXTRACTED FIELDS
+Key Promises: [List every specific commitment or promise made by Verivest Sales in the transcripts, one per line. If none found write "None identified in transcripts."]
+Scope of Services: [Summarize the agreed scope of services as discussed in transcripts and form — what Verivest is specifically doing for this client. 2-3 sentences max.]
+
 RULES:
 - Transcripts always win over form fields if they conflict — note both and flag the discrepancy
 - Never invent commitments — only flag what is explicitly stated
@@ -256,8 +264,28 @@ export default async function handler(req, res) {
     const claudeResults = await Promise.allSettled(claudePromises);
 
     const fundDocsOutput = claudeResults[0].status === 'fulfilled' ? claudeResults[0].value : '⚠️ Fund docs analysis failed.';
-    const transcriptOutput = claudeResults[1].status === 'fulfilled' ? claudeResults[1].value : '⚠️ Transcript analysis failed.';
+    const rawTranscriptOutput = claudeResults[1].status === 'fulfilled' ? claudeResults[1].value : '⚠️ Transcript analysis failed.';
     const syndicationOutput = claudeResults[2]?.status === 'fulfilled' ? claudeResults[2].value : '';
+
+    // ── Parse EXTRACTED FIELDS from transcript output ──
+    let transcriptOutput = rawTranscriptOutput;
+    let extractedKeyPromises = '';
+    let extractedScope = '';
+
+    const extractedMatch = rawTranscriptOutput.match(/EXTRACTED FIELDS([\s\S]*?)$/i);
+    if (extractedMatch) {
+      const extractedBlock = extractedMatch[1];
+      // Strip the extracted fields section from the brief
+      transcriptOutput = rawTranscriptOutput.replace(/---\s*
+EXTRACTED FIELDS[\s\S]*?$/, '').trim();
+
+      const promisesMatch = extractedBlock.match(/Key Promises:\s*([\s\S]*?)(?:
+Scope of Services:|$)/i);
+      const scopeMatch = extractedBlock.match(/Scope of Services:\s*([\s\S]*?)$/i);
+
+      if (promisesMatch) extractedKeyPromises = promisesMatch[1].trim();
+      if (scopeMatch) extractedScope = scopeMatch[1].trim();
+    }
 
     // ── Combine into one brief ──
     const brief = [
@@ -276,6 +304,14 @@ export default async function handler(req, res) {
     const clickupData = await clickupRes.json();
     if (!clickupData.id) throw new Error(clickupData.err || 'ClickUp task creation failed');
     const taskId = clickupData.id;
+
+    // ── Add Claude-extracted fields to custom fields ──
+    if (extractedKeyPromises && extractedKeyPromises !== 'None identified in transcripts.') {
+      customFields.push({ id: 'd5b81a08-0089-48db-ac6d-c3988a5612d1', value: extractedKeyPromises });
+    }
+    if (extractedScope) {
+      customFields.push({ id: '466a57b9-7720-47eb-818b-a995cc2a8cb5', value: extractedScope });
+    }
 
     // ── Update custom fields individually ──
     const validFields = (customFields || []).filter(f => f.value !== undefined && f.value !== '' && f.value !== null);

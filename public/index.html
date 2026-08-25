@@ -794,7 +794,7 @@ async function submitHandover() {
 
     // Phone field — requires special format
     const phone = getVal('contact_number');
-    if (phone) customFields.push({ id: FIELD_IDS.contact_number, value: { phone: phone.replace(/\D/g, ''), country_code: 'US' } });
+    if (phone) customFields.push({ id: FIELD_IDS.contact_number, value: phone });
 
     // HubSpot link
     if (getVal('hubspot_link')) customFields.push({ id: FIELD_IDS.hubspot_link, value: getVal('hubspot_link') });
