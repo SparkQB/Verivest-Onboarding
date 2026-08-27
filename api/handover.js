@@ -275,14 +275,9 @@ export default async function handler(req, res) {
     const extractedMatch = rawTranscriptOutput.match(/EXTRACTED FIELDS([\s\S]*?)$/i);
     if (extractedMatch) {
       const extractedBlock = extractedMatch[1];
-      // Strip the extracted fields section from the brief
-      transcriptOutput = rawTranscriptOutput.replace(/---\s*
-EXTRACTED FIELDS[\s\S]*?$/, '').trim();
-
-      const promisesMatch = extractedBlock.match(/Key Promises:\s*([\s\S]*?)(?:
-Scope of Services:|$)/i);
+      transcriptOutput = rawTranscriptOutput.replace(/---[\s\S]*?EXTRACTED FIELDS[\s\S]*?$/, '').trim();
+      const promisesMatch = extractedBlock.match(/Key Promises:\s*([\s\S]*?)(?:Scope of Services:|$)/i);
       const scopeMatch = extractedBlock.match(/Scope of Services:\s*([\s\S]*?)$/i);
-
       if (promisesMatch) extractedKeyPromises = promisesMatch[1].trim();
       if (scopeMatch) extractedScope = scopeMatch[1].trim();
     }
