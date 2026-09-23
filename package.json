@@ -4,9 +4,11 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "pdf-parse": "^1.1.1",
+    "@supabase/supabase-js": "^2.45.0",
+    "jszip": "^3.10.2",
     "mammoth": "^1.7.1",
-    "xlsx": "^0.18.5",
-    "@supabase/supabase-js": "^2.45.0"
+    "pdf-parse": "^1.1.1",
+    "unpdf": "^1.8.1",
+    "xlsx": "^0.18.5"
   }
 }

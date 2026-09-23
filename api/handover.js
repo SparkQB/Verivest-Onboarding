@@ -1,16 +1,28 @@
+import zlib from 'node:zlib';
 import { createClient } from '@supabase/supabase-js';
-import pdfParse from 'pdf-parse';
+// Import the library file directly: the package entry point runs a debug self-test
+// when it isn't require()d from CommonJS, which breaks under "type": "module".
+import pdfParse from 'pdf-parse/lib/pdf-parse.js';
+import { extractText as unpdfExtractText, getDocumentProxy } from 'unpdf';
 import mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
+import JSZip from 'jszip';
 
 export const config = { maxDuration: 300 };
 
 // Token limit safety — truncate text if too long (~150k chars ≈ ~37k tokens, safe buffer)
 const MAX_CHARS_PER_BUCKET = 150000;
 
+// A document with less readable text than this is treated as unreadable and skipped
+const MIN_TEXT_CHARS = 50;
+
+// Per-file extraction limit so one pathological file can't eat the 300s budget
+const EXTRACTION_TIMEOUT_MS = 60000;
+
 function truncateText(text, maxChars = MAX_CHARS_PER_BUCKET) {
   if (text.length <= maxChars) return text;
-  return text.slice(0, maxChars) + '\n\n[Document truncated due to length — remaining content omitted]';
+  // Re-sanitize so the cut can't leave half a surrogate pair behind
+  return sanitizeText(text.slice(0, maxChars)) + '\n\n[Document truncated due to length — remaining content omitted]';
 }
 
 // ── SYSTEM PROMPTS ──────────────────────────────────────────────────────────
@@ -121,96 +133,450 @@ RULES:
 
 // ── TEXT EXTRACTION ─────────────────────────────────────────────────────────
 
-async function extractText(buffer, filename) {
+// Remove characters that break the Claude API request or add noise: lone UTF-16
+// surrogates (invalid JSON for the API), control chars, replacement chars, and
+// runs of whitespace left behind by PDF layout.
+function sanitizeText(text) {
+  if (!text) return '';
+  let s = String(text);
+  s = typeof s.toWellFormed === 'function'
+    ? s.toWellFormed()
+    : s.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '');
+  return s
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F�￾￿]/g, '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[ \t ]+/g, ' ')
+    .replace(/\n\s*\n\s*\n+/g, '\n\n')
+    .trim();
+}
+
+// Text is usable if it has enough characters and is mostly real letters/digits
+// (PDFs with broken font maps often "extract" as symbol soup).
+function isUsableText(text) {
+  if (!text || text.length < MIN_TEXT_CHARS) return false;
+  const visible = text.replace(/\s/g, '');
+  const alnum = (visible.match(/[\p{L}\p{N}]/gu) || []).length;
+  return alnum >= MIN_TEXT_CHARS && alnum / visible.length >= 0.4;
+}
+
+function withTimeout(promise, ms, label) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms); })
+  ]).finally(() => clearTimeout(timer));
+}
+
+// Decode a PDF literal string body: \n \r \t \b \f \( \) \\ \ddd and line continuations.
+function unescapePdfString(s) {
+  return s.replace(/\\(\r\n|\r|\n|[0-7]{1,3}|.)/g, (_, c) => {
+    if (c === 'n') return '\n';
+    if (c === 'r') return '\r';
+    if (c === 't') return '\t';
+    if (c === 'b' || c === 'f') return '';
+    if (/^[0-7]+$/.test(c)) return String.fromCharCode(parseInt(c, 8));
+    if (c[0] === '\r' || c[0] === '\n') return '';
+    return c;
+  });
+}
+
+// Pull text-showing operators (Tj, TJ, ', ") out of a PDF content stream.
+function textFromContentStream(content) {
+  const out = [];
+  const opRe = /\[((?:\\.|[^\]\\])*)\]\s*TJ|\(((?:\\.|[^\\)])*)\)\s*(?:Tj|'|")|\b(T\*|Td|TD|ET)\b/g;
+  let m;
+  while ((m = opRe.exec(content))) {
+    if (m[1] !== undefined) {
+      const parts = [];
+      const partRe = /\(((?:\\.|[^\\)])*)\)|(-?\d+(?:\.\d+)?)/g;
+      let p;
+      while ((p = partRe.exec(m[1]))) {
+        if (p[1] !== undefined) parts.push(unescapePdfString(p[1]));
+        else if (parseFloat(p[2]) <= -200) parts.push(' ');
+      }
+      out.push(parts.join(''));
+    } else if (m[2] !== undefined) {
+      out.push(unescapePdfString(m[2]));
+    } else {
+      out.push('\n');
+    }
+  }
+  return out.join('').replace(/[ \t]*\n[ \t]*/g, '\n');
+}
+
+function decodeAscii85(str) {
+  const data = str.replace(/^<~/, '').replace(/~>[\s\S]*$/, '').replace(/\s/g, '');
+  const out = [];
+  let group = [];
+  for (const ch of data) {
+    if (ch === 'z' && group.length === 0) { out.push(0, 0, 0, 0); continue; }
+    const c = ch.charCodeAt(0) - 33;
+    if (c < 0 || c > 84) continue;
+    group.push(c);
+    if (group.length === 5) {
+      const n = group.reduce((acc, d) => acc * 85 + d, 0);
+      out.push((n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255);
+      group = [];
+    }
+  }
+  if (group.length > 1) {
+    const pad = 5 - group.length;
+    const n = [...group, 84, 84, 84, 84].slice(0, 5).reduce((acc, d) => acc * 85 + d, 0);
+    out.push(...[(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].slice(0, 4 - pad));
+  }
+  return Buffer.from(out);
+}
+
+// Last-resort PDF extraction: inflate every stream and scan for text operators.
+// Works on PDFs whose structure the parsers reject (bad xref, truncated files)
+// as long as the content isn't encrypted or font-encoded.
+function extractRawPdfText(buffer) {
+  const src = buffer.toString('latin1');
+  const chunks = [];
+  const streamRe = /stream\r?\n/g;
+  let m;
+  while ((m = streamRe.exec(src))) {
+    const start = m.index + m[0].length;
+    const end = src.indexOf('endstream', start);
+    if (end === -1) break;
+    let raw = buffer.subarray(start, end);
+    const dict = src.slice(Math.max(0, m.index - 400), m.index);
+    const filters = dict.slice(dict.lastIndexOf('<<'));
+    if (filters.includes('/ASCII85Decode') || filters.includes('/A85')) {
+      raw = decodeAscii85(raw.toString('latin1'));
+    } else if (filters.includes('/ASCIIHexDecode') || filters.includes('/AHx')) {
+      raw = Buffer.from(raw.toString('latin1').replace(/[^0-9a-f]/gi, ''), 'hex');
+    }
+    let content = null;
+    for (const inflate of [zlib.inflateSync, zlib.inflateRawSync]) {
+      try {
+        content = inflate(raw, { finishFlush: zlib.constants.Z_SYNC_FLUSH }).toString('latin1');
+        break;
+      } catch { /* not this encoding */ }
+    }
+    chunks.push(textFromContentStream(content ?? raw.toString('latin1')));
+    streamRe.lastIndex = end;
+  }
+  let text = chunks.filter(Boolean).join('\n');
+  if (!text.trim()) text = textFromContentStream(src);
+  return text;
+}
+
+// Try each PDF strategy in order, stopping at the first one that yields usable text.
+async function extractPdf(buffer) {
+  const attempts = [];
+
+  const strategies = [
+    ['pdf-parse', async () => (await pdfParse(buffer)).text],
+    ['pdf.js', async () => {
+      // unpdf transfers the array's buffer to pdf.js, so hand it a copy
+      const pdf = await getDocumentProxy(new Uint8Array(buffer));
+      try {
+        return (await unpdfExtractText(pdf, { mergePages: true })).text;
+      } finally {
+        pdf.destroy?.();
+      }
+    }],
+    ['raw', async () => extractRawPdfText(buffer)],
+  ];
+
+  for (const [method, run] of strategies) {
+    try {
+      const text = sanitizeText(await run());
+      if (isUsableText(text)) return { text, method };
+      attempts.push(`${method}: ${text.length ? 'unreadable text' : 'no text'}`);
+    } catch (err) {
+      const msg = err?.name === 'PasswordException' ? 'password-protected' : (err?.message || String(err));
+      attempts.push(`${method}: ${msg}`);
+      if (err?.name === 'PasswordException') break; // no strategy can read a locked file
+    }
+  }
+
+  console.warn(`[extract] PDF strategies exhausted: ${attempts.join('; ')}`);
+  const locked = attempts.some(a => a.includes('password-protected'));
+  throw new Error(locked
+    ? 'PDF is password-protected'
+    : 'no readable text found (likely a scanned image or unsupported font encoding)');
+}
+
+async function extractSingle(buffer, filename) {
   const ext = filename.split('.').pop().toLowerCase();
+  if (ext === 'pdf') return extractPdf(buffer);
+  if (ext === 'docx') return { text: (await mammoth.extractRawText({ buffer })).value, method: 'mammoth' };
+  if (ext === 'txt' || ext === 'csv' || ext === 'md') return { text: buffer.toString('utf-8'), method: 'text' };
+  if (ext === 'xlsx' || ext === 'xls') {
+    const workbook = XLSX.read(buffer, { type: 'buffer' });
+    const text = workbook.SheetNames.map(name => {
+      const sheet = workbook.Sheets[name];
+      return `Sheet: ${name}\n${XLSX.utils.sheet_to_csv(sheet)}`;
+    }).join('\n\n');
+    return { text, method: 'xlsx' };
+  }
+  if (ext === 'pptx') {
+    const zip = await JSZip.loadAsync(buffer);
+    const slideNum = f => parseInt(f.match(/slide(\d+)\.xml/)[1], 10);
+    const slideFiles = Object.keys(zip.files)
+      .filter(f => /^ppt\/slides\/slide\d+\.xml$/.test(f))
+      .sort((a, b) => slideNum(a) - slideNum(b));
+    const texts = await Promise.all(slideFiles.map(async f => {
+      const xml = await zip.files[f].async('string');
+      return xml.replace(/<\/a:p>/g, '\n').replace(/<[^>]+>/g, ' ').replace(/[ \t]+/g, ' ').trim();
+    }));
+    return { text: texts.join('\n\n'), method: 'pptx' };
+  }
+  throw new Error(`unsupported file type (.${ext})`);
+}
+
+// Returns one result per readable document: { name, text, error }.
+// ZIPs are expanded so each file inside is reported (and skipped) individually.
+async function extractFile(buffer, filename, depth = 0) {
+  const ext = filename.split('.').pop().toLowerCase();
+
+  if (ext === 'zip') {
+    if (depth > 1) return [{ name: filename, text: '', error: 'nested ZIP too deep' }];
+    let zip;
+    try {
+      zip = await JSZip.loadAsync(buffer);
+    } catch (err) {
+      return [{ name: filename, text: '', error: `could not open ZIP: ${err.message}` }];
+    }
+    const entries = Object.keys(zip.files).filter(f => {
+      const base = f.split('/').pop();
+      return !zip.files[f].dir && !f.startsWith('__MACOSX/') && base && !base.startsWith('.');
+    });
+    if (!entries.length) return [{ name: filename, text: '', error: 'ZIP is empty' }];
+    const nested = await Promise.all(entries.map(async entry => {
+      const entryBuffer = Buffer.from(await zip.files[entry].async('arraybuffer'));
+      const results = await extractFile(entryBuffer, entry.split('/').pop(), depth + 1);
+      return results.map(r => ({ ...r, name: `${filename} → ${r.name}` }));
+    }));
+    return nested.flat();
+  }
+
   try {
-    if (ext === 'pdf') {
-      const data = await pdfParse(buffer);
-      return data.text;
+    const { text, method } = await withTimeout(extractSingle(buffer, filename), EXTRACTION_TIMEOUT_MS, 'extraction');
+    const clean = sanitizeText(text);
+    if (!isUsableText(clean)) {
+      return [{ name: filename, text: '', error: clean.length ? `too little readable text (${clean.length} chars)` : 'no text found' }];
     }
-    if (ext === 'docx') {
-      const result = await mammoth.extractRawText({ buffer });
-      return result.value;
-    }
-    if (ext === 'txt' || ext === 'csv') {
-      return buffer.toString('utf-8');
-    }
-    if (ext === 'xlsx' || ext === 'xls') {
-      const workbook = XLSX.read(buffer, { type: 'buffer' });
-      return workbook.SheetNames.map(name => {
-        const sheet = workbook.Sheets[name];
-        return `Sheet: ${name}\n${XLSX.utils.sheet_to_csv(sheet)}`;
-      }).join('\n\n');
-    }
-    if (ext === 'pptx') {
-      const JSZip = (await import('jszip')).default;
-      const zip = await JSZip.loadAsync(buffer);
-      const slideFiles = Object.keys(zip.files).filter(f => f.match(/ppt\/slides\/slide\d+\.xml/));
-      const texts = await Promise.all(
-        slideFiles.sort().map(async f => {
-          const xml = await zip.files[f].async('string');
-          return xml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-        })
-      );
-      return texts.join('\n\n');
-    }
-    if (ext === 'zip') {
-      const JSZip = (await import('jszip')).default;
-      const zip = await JSZip.loadAsync(buffer);
-      const fileEntries = Object.keys(zip.files).filter(f => !zip.files[f].dir);
-      const texts = await Promise.allSettled(
-        fileEntries.map(async entry => {
-          const entryBuffer = Buffer.from(await zip.files[entry].async('arraybuffer'));
-          const entryName = entry.split('/').pop();
-          const text = await extractText(entryBuffer, entryName);
-          return `--- File inside ZIP: ${entryName} ---\n${text}`;
-        })
-      );
-      return texts
-        .filter(r => r.status === 'fulfilled')
-        .map(r => r.value)
-        .join('\n\n');
-    }
-    return `[Could not extract text from ${filename} — unsupported format]`;
+    console.log(`[extract] ${filename}: ${clean.length} chars via ${method}`);
+    return [{ name: filename, text: clean }];
   } catch (err) {
-    return `[Error extracting ${filename}: ${err.message}]`;
+    return [{ name: filename, text: '', error: err.message || String(err) }];
   }
 }
 
+// Downloads and extracts every file in a bucket. Failures never throw — they're
+// collected in `skipped` so the brief can name them.
 async function downloadAndExtract(supabase, files) {
-  if (!files || files.length === 0) return '';
-  const results = await Promise.allSettled(
-    files.map(async ({ path, name }) => {
+  const empty = { text: '', included: [], skipped: [] };
+  if (!files || files.length === 0) return empty;
+
+  const perFile = await Promise.all(files.map(async ({ path, name }) => {
+    try {
       const { data, error } = await supabase.storage.from('onboarding-docs').download(path);
-      if (error) return `[Could not download ${name}: ${error.message}]`;
+      if (error) return [{ name, text: '', error: `download failed: ${error.message}` }];
       const buffer = Buffer.from(await data.arrayBuffer());
-      const text = await extractText(buffer, name);
-      return `=== ${name} ===\n${text}`;
-    })
-  );
-  return results.map(r => r.status === 'fulfilled' ? r.value : '[Extraction failed]').join('\n\n');
+      return await extractFile(buffer, name);
+    } catch (err) {
+      return [{ name, text: '', error: err.message || String(err) }];
+    }
+  }));
+
+  const results = perFile.flat();
+  const ok = results.filter(r => !r.error);
+  const skipped = results.filter(r => r.error).map(r => ({ name: r.name, reason: r.error }));
+  skipped.forEach(s => console.warn(`[extract] skipped ${s.name}: ${s.reason}`));
+
+  return {
+    text: ok.map(r => `=== ${r.name} ===\n${r.text}`).join('\n\n'),
+    included: ok.map(r => r.name),
+    skipped,
+  };
+}
+
+// Builds the user message for one Claude call. Truncation only ever cuts the
+// documents, never the form data or the list of unreadable files.
+function buildClaudeInput(formData, label, extracted, emptyMessage) {
+  const skippedNote = extracted.skipped.length
+    ? `\n\n=== FILES THAT COULD NOT BE READ ===\nThe following uploaded files could not be read and were NOT analyzed. Do not guess at their contents. Mention them under the relevant section so the team knows to review them manually:\n${extracted.skipped.map(s => `- ${s.name} (${s.reason})`).join('\n')}`
+    : '';
+  const header = `${formData || ''}${skippedNote}\n\n=== ${label} ===\n`;
+  const body = extracted.text || emptyMessage;
+  return header + truncateText(body, Math.max(10000, MAX_CHARS_PER_BUCKET - header.length));
 }
 
 // ── CLAUDE CALL ──────────────────────────────────────────────────────────────
 
-async function callClaude(apiKey, systemPrompt, userContent, maxTokens = 2000) {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504, 529]);
+
+async function callClaude(apiKey, systemPrompt, userContent, maxTokens = 2000, label = 'claude') {
+  const maxAttempts = 3;
+  let lastError;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-5',
+          max_tokens: maxTokens,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userContent }]
+        })
+      });
+
+      const raw = await res.text();
+      let data;
+      try { data = JSON.parse(raw); } catch { data = null; }
+
+      if (!res.ok || data?.error || !data) {
+        const msg = data?.error?.message || raw.slice(0, 300) || `HTTP ${res.status}`;
+        lastError = new Error(`Claude API ${res.status}: ${msg}`);
+        if (!RETRYABLE_STATUS.has(res.status) || attempt === maxAttempts) throw lastError;
+        const retryAfter = parseFloat(res.headers.get('retry-after'));
+        const waitMs = Math.min(Number.isFinite(retryAfter) ? retryAfter * 1000 : 2000 * 2 ** (attempt - 1), 20000);
+        console.warn(`[${label}] attempt ${attempt} failed (${lastError.message}); retrying in ${waitMs}ms`);
+        await new Promise(r => setTimeout(r, waitMs));
+        continue;
+      }
+
+      const text = (data.content || []).map(b => b.text || '').join('').trim();
+      if (!text) throw new Error(`Claude returned an empty response (stop_reason: ${data.stop_reason})`);
+      return text;
+    } catch (err) {
+      lastError = err;
+      // fetch() itself throws on network errors — retry those too
+      if (err.message?.startsWith('Claude API') || attempt === maxAttempts) break;
+      console.warn(`[${label}] attempt ${attempt} network error: ${err.message}`);
+      await new Promise(r => setTimeout(r, 2000 * 2 ** (attempt - 1)));
+    }
+  }
+
+  console.error(`[${label}] failed: ${lastError?.message}`);
+  throw lastError;
+}
+
+// ── CLICKUP CUSTOM FIELDS ────────────────────────────────────────────────────
+
+const PHONE_FIELD_ID = '56a8831d-4db0-4471-9a78-adc1d5dc07d1';
+const KEY_PROMISES_FIELD_ID = 'd5b81a08-0089-48db-ac6d-c3988a5612d1';
+const SCOPE_FIELD_ID = '466a57b9-7720-47eb-818b-a995cc2a8cb5';
+const TEXT_FALLBACK_MAX_CHARS = 1000;
+
+// ClickUp phone fields only accept numbers with a country code, e.g. "+1 555 000 0000".
+// US/Canada numbers without one get +1; anything else must already start with +.
+function normalizePhone(value) {
+  const input = String(value).trim();
+  const digits = input.replace(/\D/g, '');
+  if (input.startsWith('+')) return digits.length >= 8 ? `+${digits}` : null;
+  if (digits.length === 10) return `+1 ${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6)}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+1 ${digits.slice(1, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`;
+  if (digits.length > 11) return `+${digits}`;
+  return null;
+}
+
+async function getListFieldTypes(clickupKey, listId) {
+  try {
+    const res = await fetch(`https://api.clickup.com/api/v2/list/${listId}/field`, {
+      headers: { 'Authorization': clickupKey }
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const { fields = [] } = await res.json();
+    return new Map(fields.map(f => [f.id, f.type]));
+  } catch (err) {
+    console.warn(`[clickup] could not load field definitions: ${err.message}`);
+    return new Map();
+  }
+}
+
+// Coerce a value to what ClickUp expects for the field's type. Returns
+// undefined if the value can't be sent at all.
+function coerceFieldValue(type, id, value) {
+  if (type === 'phone' || (!type && id === PHONE_FIELD_ID)) return normalizePhone(value) ?? undefined;
+  if (type === 'short_text') return sanitizeText(value).replace(/\s*\n\s*/g, ' · ');
+  if (type === 'text') return sanitizeText(value);
+  if (type === 'email') return String(value).trim();
+  if (type === 'url') {
+    const url = String(value).trim();
+    return /^https?:\/\//i.test(url) ? url : `https://${url}`;
+  }
+  if (type === 'number' || type === 'currency') {
+    const n = typeof value === 'number' ? value : parseFloat(String(value).replace(/[^0-9.-]/g, ''));
+    return Number.isFinite(n) ? n : undefined;
+  }
+  return typeof value === 'string' ? sanitizeText(value) : value;
+}
+
+async function setCustomField(clickupKey, taskId, id, value) {
+  const res = await fetch(`https://api.clickup.com/api/v2/task/${taskId}/field/${id}`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01'
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-5',
-      max_tokens: maxTokens,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userContent }]
-    })
+    headers: { 'Authorization': clickupKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ value })
   });
-  const data = await res.json();
-  if (data.error) throw new Error('Claude error: ' + data.error.message);
-  return (data.content || []).map(b => b.text || '').join('').trim();
+  if (res.ok) return null;
+  const body = await res.text().catch(() => '');
+  return `HTTP ${res.status}: ${body.slice(0, 300)}`;
+}
+
+// Merge a Claude-extracted value into a field that Sales may have already filled
+// in on the form, so the two don't race each other as separate writes.
+function mergeField(fields, id, extracted, heading) {
+  if (!extracted) return;
+  const existing = fields.find(f => f.id === id);
+  if (!existing) {
+    fields.push({ id, value: extracted });
+  } else if (String(existing.value).trim() !== extracted.trim()) {
+    existing.value = `${existing.value}\n\n${heading}:\n${extracted}`;
+  }
+}
+
+async function updateCustomFields(clickupKey, listId, taskId, customFields) {
+  const fieldTypes = await getListFieldTypes(clickupKey, listId);
+  const errors = [];
+
+  // One write per field ID — later duplicates replace earlier ones
+  const byId = new Map();
+  for (const f of customFields) {
+    if (f && f.id && f.value !== undefined && f.value !== null && f.value !== '') byId.set(f.id, f.value);
+  }
+
+  await Promise.all([...byId].map(async ([id, rawValue]) => {
+    const type = fieldTypes.get(id);
+    const value = coerceFieldValue(type, id, rawValue);
+    if (value === undefined || value === '') {
+      errors.push({ id, type, error: `invalid value for ${type || 'field'}: ${JSON.stringify(rawValue)}` });
+      return;
+    }
+
+    let error = await setCustomField(clickupKey, taskId, id, value);
+
+    // Long text rejected: retry once as a single, shorter line
+    if (error && error.startsWith('HTTP 400') && typeof value === 'string' && value.length > 0) {
+      const flattened = value.replace(/\s*\n\s*/g, ' · ');
+      const shorter = flattened.length > TEXT_FALLBACK_MAX_CHARS
+        ? flattened.slice(0, TEXT_FALLBACK_MAX_CHARS - 1).trimEnd() + '…'
+        : flattened;
+      if (shorter !== value) {
+        console.warn(`[clickup] field ${id} (${type || 'unknown type'}) rejected (${error}); retrying with ${shorter.length}-char single-line value`);
+        const retryError = await setCustomField(clickupKey, taskId, id, shorter);
+        if (!retryError) return;
+        error = `${error} | retry: ${retryError}`;
+      }
+    }
+
+    if (error) {
+      console.error(`[clickup] field ${id} (${type || 'unknown type'}) failed: ${error}`);
+      errors.push({ id, type, error });
+    }
+  }));
+
+  return errors;
 }
 
 // ── MAIN HANDLER ─────────────────────────────────────────────────────────────
@@ -241,31 +607,39 @@ export default async function handler(req, res) {
       : null;
 
     // ── Extract text from each bucket in parallel ──
-    const [fundDocsText, transcriptText, syndicationText] = await Promise.all([
-      supabase && buckets?.fundDocs?.length ? downloadAndExtract(supabase, buckets.fundDocs) : Promise.resolve(''),
-      supabase && buckets?.transcripts?.length ? downloadAndExtract(supabase, buckets.transcripts) : Promise.resolve(''),
-      supabase && buckets?.syndication?.length ? downloadAndExtract(supabase, buckets.syndication) : Promise.resolve(''),
+    const noFiles = { text: '', included: [], skipped: [] };
+    const [fundDocs, transcripts, syndication] = await Promise.all([
+      supabase && buckets?.fundDocs?.length ? downloadAndExtract(supabase, buckets.fundDocs) : noFiles,
+      supabase && buckets?.transcripts?.length ? downloadAndExtract(supabase, buckets.transcripts) : noFiles,
+      supabase && buckets?.syndication?.length ? downloadAndExtract(supabase, buckets.syndication) : noFiles,
     ]);
+    const skippedFiles = [...fundDocs.skipped, ...transcripts.skipped, ...syndication.skipped];
 
-    // ── Three Claude calls in parallel ──
-    const fundDocsInput = truncateText(`${formData}\n\n=== FUND DOCUMENTS ===\n${fundDocsText || '[No fund documents uploaded]'}`);
-    const transcriptInput = truncateText(`${formData}\n\n=== CALL TRANSCRIPTS ===\n${transcriptText || '[No transcripts uploaded]'}`);
+    // ── Claude calls in parallel ──
+    // Each call always runs on the form data; unreadable files are listed, not sent.
+    const fundDocsInput = buildClaudeInput(formData, 'FUND DOCUMENTS', fundDocs,
+      fundDocs.skipped.length ? '[No readable fund documents — see list of unreadable files above]' : '[No fund documents uploaded]');
+    const transcriptInput = buildClaudeInput(formData, 'CALL TRANSCRIPTS', transcripts,
+      transcripts.skipped.length ? '[No readable transcripts — see list of unreadable files above]' : '[No transcripts uploaded]');
 
     const claudePromises = [
-      callClaude(ANTHROPIC_KEY, PROMPT_FUND_DOCS, fundDocsInput, 1500),
-      callClaude(ANTHROPIC_KEY, PROMPT_TRANSCRIPTS, transcriptInput, 2000),
+      callClaude(ANTHROPIC_KEY, PROMPT_FUND_DOCS, fundDocsInput, 1500, 'fund-docs'),
+      callClaude(ANTHROPIC_KEY, PROMPT_TRANSCRIPTS, transcriptInput, 2000, 'transcripts'),
     ];
 
-    if (syndicationText) {
-      const syndicationInput = truncateText(`${formData}\n\n=== SYNDICATION DOCUMENTS ===\n${syndicationText}`);
-      claudePromises.push(callClaude(ANTHROPIC_KEY, PROMPT_SYNDICATION, syndicationInput, 1000));
+    // Syndication only runs when at least one syndication document was readable
+    if (syndication.text) {
+      const syndicationInput = buildClaudeInput(formData, 'SYNDICATION DOCUMENTS', syndication, '');
+      claudePromises.push(callClaude(ANTHROPIC_KEY, PROMPT_SYNDICATION, syndicationInput, 1000, 'syndication'));
     }
 
     const claudeResults = await Promise.allSettled(claudePromises);
+    const failureNote = (result, label) => `⚠️ ${label} analysis failed: ${result.reason?.message || 'unknown error'}`;
 
-    const fundDocsOutput = claudeResults[0].status === 'fulfilled' ? claudeResults[0].value : '⚠️ Fund docs analysis failed.';
-    const rawTranscriptOutput = claudeResults[1].status === 'fulfilled' ? claudeResults[1].value : '⚠️ Transcript analysis failed.';
-    const syndicationOutput = claudeResults[2]?.status === 'fulfilled' ? claudeResults[2].value : '';
+    const fundDocsOutput = claudeResults[0].status === 'fulfilled' ? claudeResults[0].value : failureNote(claudeResults[0], 'Fund docs');
+    const rawTranscriptOutput = claudeResults[1].status === 'fulfilled' ? claudeResults[1].value : failureNote(claudeResults[1], 'Transcript');
+    const syndicationOutput = !claudeResults[2] ? ''
+      : claudeResults[2].status === 'fulfilled' ? claudeResults[2].value : failureNote(claudeResults[2], 'Syndication');
 
     // ── Parse EXTRACTED FIELDS from transcript output ──
     let transcriptOutput = rawTranscriptOutput;
@@ -282,11 +656,17 @@ export default async function handler(req, res) {
       if (scopeMatch) extractedScope = scopeMatch[1].trim();
     }
 
+    // ── Note any files that couldn't be read ──
+    const extractionNotes = skippedFiles.length
+      ? `DOCUMENT EXTRACTION NOTES\nThe following uploaded files could not be read and were not included in this analysis. Please review them manually:\n${skippedFiles.map(s => `- ${s.name} — ${s.reason}`).join('\n')}`
+      : '';
+
     // ── Combine into one brief ──
     const brief = [
       fundDocsOutput,
       transcriptOutput,
-      syndicationOutput
+      syndicationOutput,
+      extractionNotes
     ].filter(Boolean).join('\n\n---\n\n');
 
     // ── Create ClickUp task ──
@@ -301,28 +681,25 @@ export default async function handler(req, res) {
     const taskId = clickupData.id;
 
     // ── Add Claude-extracted fields to custom fields ──
-    if (extractedKeyPromises && extractedKeyPromises !== 'None identified in transcripts.') {
-      customFields.push({ id: 'd5b81a08-0089-48db-ac6d-c3988a5612d1', value: extractedKeyPromises });
+    const fields = Array.isArray(customFields) ? [...customFields] : [];
+    if (extractedKeyPromises && !/^none identified/i.test(extractedKeyPromises)) {
+      mergeField(fields, KEY_PROMISES_FIELD_ID, extractedKeyPromises, 'From call transcripts');
     }
-    if (extractedScope) {
-      customFields.push({ id: '466a57b9-7720-47eb-818b-a995cc2a8cb5', value: extractedScope });
-    }
+    mergeField(fields, SCOPE_FIELD_ID, extractedScope, 'From call transcripts');
 
     // ── Update custom fields individually ──
-    const validFields = (customFields || []).filter(f => f.value !== undefined && f.value !== '' && f.value !== null);
-    await Promise.allSettled(
-      validFields.map(field =>
-        fetch(`https://api.clickup.com/api/v2/task/${taskId}/field/${field.id}`, {
-          method: 'POST',
-          headers: { 'Authorization': CLICKUP_KEY, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ value: field.value })
-        })
-      )
-    );
+    const fieldErrors = await updateCustomFields(CLICKUP_KEY, CLICKUP_LIST, taskId, fields);
 
-    return res.status(200).json({ brief, taskId, taskUrl: `https://app.clickup.com/t/${taskId}` });
+    return res.status(200).json({
+      brief,
+      taskId,
+      taskUrl: `https://app.clickup.com/t/${taskId}`,
+      skippedFiles,
+      fieldErrors
+    });
 
   } catch (err) {
+    console.error('[handover] failed:', err);
     return res.status(500).json({ error: err.message || 'Unknown error' });
   }
 }

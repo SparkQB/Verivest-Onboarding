@@ -850,6 +850,15 @@ async function submitHandover() {
     document.getElementById('ai-output-wrap').style.display = 'block';
     document.getElementById('ai-output').textContent = aiOutput;
 
+    const escapeHtml = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    if (result.skippedFiles?.length) {
+      document.getElementById('result-status').innerHTML += `<div class="status-box warning" style="margin-top:8px;"><strong>Some files could not be read</strong> and were not included in the brief. They are listed in the task under Document Extraction Notes:<br>${result.skippedFiles.map(f => '• ' + escapeHtml(f.name) + ' (' + escapeHtml(f.reason) + ')').join('<br>')}</div>`;
+    }
+    if (result.fieldErrors?.length) {
+      const names = Object.fromEntries(Object.entries(FIELD_IDS).map(([k, v]) => [v, k]));
+      document.getElementById('result-status').innerHTML += `<div class="status-box warning" style="margin-top:8px;"><strong>${result.fieldErrors.length} ClickUp field(s) could not be set</strong> — please fill them in on the task: ${result.fieldErrors.map(f => escapeHtml(names[f.id] || f.id)).join(', ')}</div>`;
+    }
+
   } catch (err) {
     document.getElementById('generating-section').style.display = 'none';
     document.getElementById('result-section').style.display = 'block';
