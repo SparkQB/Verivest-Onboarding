@@ -1,7 +1,7 @@
 import zlib from 'node:zlib';
 import { createClient } from '@supabase/supabase-js';
-// Import the library file directly: the package entry point runs a debug self-test
-// when it isn't require()d from CommonJS, which breaks under "type": "module".
+// Import the library file directly: in some pdf-parse 1.1.x releases the package
+// entry point runs a debug self-test when it isn't require()d from CommonJS.
 import pdfParse from 'pdf-parse/lib/pdf-parse.js';
 import { extractText as unpdfExtractText, getDocumentProxy } from 'unpdf';
 import mammoth from 'mammoth';
