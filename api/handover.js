@@ -366,10 +366,60 @@ async function extractFile(buffer, filename, depth = 0) {
   }
 }
 
+// ── DUPLICATE DETECTION ─────────────────────────────────────────────────────
+
+// Two extracted documents count as duplicates when their word-trigram sets
+// overlap at least this much (Jaccard). PDF and DOCX copies of the same
+// agreement differ slightly (headers, page numbers, hyphenation), so this is
+// deliberately below 1 but high enough that drafts with real edits stay apart.
+const DUPLICATE_SIMILARITY = 0.7;
+
+function trigramSet(text) {
+  const words = text.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [];
+  const set = new Set();
+  for (let i = 0; i + 3 <= words.length; i++) set.add(`${words[i]} ${words[i + 1]} ${words[i + 2]}`);
+  return set;
+}
+
+function jaccard(a, b) {
+  if (!a.size || !b.size) return 0;
+  const [small, large] = a.size <= b.size ? [a, b] : [b, a];
+  if (small.size / large.size < DUPLICATE_SIMILARITY) return 0; // sizes too different to reach the threshold
+  let shared = 0;
+  for (const t of small) if (large.has(t)) shared++;
+  return shared / (a.size + b.size - shared);
+}
+
+// Backstop for the upload-time duplicate prompt: drops documents whose text is
+// near-identical to another in the same bucket (e.g. "OA.pdf" and "OA signed.docx",
+// or two copies under different names). Keeps the version with the most text.
+function removeDuplicateDocuments(docs) {
+  const sorted = [...docs].sort((a, b) => b.text.length - a.text.length);
+  const kept = [];
+  const duplicates = [];
+  for (const doc of sorted) {
+    const trigrams = trigramSet(doc.text);
+    let match = null;
+    for (const k of kept) {
+      const score = jaccard(trigrams, k.trigrams);
+      if (score >= DUPLICATE_SIMILARITY) { match = { doc: k, score }; break; }
+    }
+    if (match) {
+      duplicates.push({ name: doc.name, keptName: match.doc.name, similarity: Math.round(match.score * 100) });
+      console.warn(`[dedupe] dropped ${doc.name}: ${Math.round(match.score * 100)}% match with ${match.doc.name}`);
+    } else {
+      kept.push({ doc, name: doc.name, trigrams });
+    }
+  }
+  // Preserve the original upload order for what's sent to Claude
+  const keptDocs = new Set(kept.map(k => k.doc));
+  return { docs: docs.filter(d => keptDocs.has(d)), duplicates };
+}
+
 // Downloads and extracts every file in a bucket. Failures never throw — they're
 // collected in `skipped` so the brief can name them.
 async function downloadAndExtract(supabase, files) {
-  const empty = { text: '', included: [], skipped: [] };
+  const empty = { text: '', included: [], skipped: [], duplicates: [] };
   if (!files || files.length === 0) return empty;
 
   const perFile = await Promise.all(files.map(async ({ path, name }) => {
@@ -384,14 +434,15 @@ async function downloadAndExtract(supabase, files) {
   }));
 
   const results = perFile.flat();
-  const ok = results.filter(r => !r.error);
   const skipped = results.filter(r => r.error).map(r => ({ name: r.name, reason: r.error }));
   skipped.forEach(s => console.warn(`[extract] skipped ${s.name}: ${s.reason}`));
+  const { docs: ok, duplicates } = removeDuplicateDocuments(results.filter(r => !r.error));
 
   return {
     text: ok.map(r => `=== ${r.name} ===\n${r.text}`).join('\n\n'),
     included: ok.map(r => r.name),
     skipped,
+    duplicates,
   };
 }
 
@@ -607,13 +658,14 @@ export default async function handler(req, res) {
       : null;
 
     // ── Extract text from each bucket in parallel ──
-    const noFiles = { text: '', included: [], skipped: [] };
+    const noFiles = { text: '', included: [], skipped: [], duplicates: [] };
     const [fundDocs, transcripts, syndication] = await Promise.all([
       supabase && buckets?.fundDocs?.length ? downloadAndExtract(supabase, buckets.fundDocs) : noFiles,
       supabase && buckets?.transcripts?.length ? downloadAndExtract(supabase, buckets.transcripts) : noFiles,
       supabase && buckets?.syndication?.length ? downloadAndExtract(supabase, buckets.syndication) : noFiles,
     ]);
     const skippedFiles = [...fundDocs.skipped, ...transcripts.skipped, ...syndication.skipped];
+    const duplicateFiles = [...fundDocs.duplicates, ...transcripts.duplicates, ...syndication.duplicates];
 
     // ── Claude calls in parallel ──
     // Each call always runs on the form data; unreadable files are listed, not sent.
@@ -657,9 +709,14 @@ export default async function handler(req, res) {
     }
 
     // ── Note any files that couldn't be read ──
-    const extractionNotes = skippedFiles.length
-      ? `DOCUMENT EXTRACTION NOTES\nThe following uploaded files could not be read and were not included in this analysis. Please review them manually:\n${skippedFiles.map(s => `- ${s.name} — ${s.reason}`).join('\n')}`
-      : '';
+    const noteParts = [];
+    if (skippedFiles.length) {
+      noteParts.push(`The following uploaded files could not be read and were not included in this analysis. Please review them manually:\n${skippedFiles.map(s => `- ${s.name} — ${s.reason}`).join('\n')}`);
+    }
+    if (duplicateFiles.length) {
+      noteParts.push(`The following files were near-identical copies of another upload, so only one version was analyzed:\n${duplicateFiles.map(d => `- ${d.name} — ${d.similarity}% match with ${d.keptName} (analyzed instead)`).join('\n')}`);
+    }
+    const extractionNotes = noteParts.length ? `DOCUMENT EXTRACTION NOTES\n${noteParts.join('\n\n')}` : '';
 
     // ── Combine into one brief ──
     const brief = [
@@ -695,6 +752,7 @@ export default async function handler(req, res) {
       taskId,
       taskUrl: `https://app.clickup.com/t/${taskId}`,
       skippedFiles,
+      duplicateFiles,
       fieldErrors
     });
 

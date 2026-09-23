@@ -98,6 +98,26 @@ input::placeholder, textarea::placeholder { color:#c0c4ce; }
 .file-item-status.error { background:#fde8e8; color:#8b1a1a; }
 .file-item-remove { background:none; border:none; color:#6b7280; cursor:pointer; font-size:18px; line-height:1; padding:0 4px; }
 
+/* Duplicate document prompt */
+.dup-overlay { position:fixed; inset:0; background:rgba(8,12,20,0.72); display:none; align-items:center; justify-content:center; padding:16px; z-index:200; }
+.dup-overlay.open { display:flex; }
+.dup-modal { background:var(--white); color:#1a202c; border-radius:5px; max-width:560px; width:100%; max-height:calc(100vh - 32px); overflow-y:auto; position:relative; }
+.dup-modal::before { content:''; display:block; height:2px; background:var(--persimmon); }
+.dup-body { padding:24px; }
+.dup-eyebrow { font-size:10px; font-weight:600; letter-spacing:0.14em; text-transform:uppercase; color:var(--persimmon); margin-bottom:8px; }
+.dup-title { font-size:17px; font-weight:700; line-height:1.35; margin-bottom:16px; }
+.dup-options { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:18px; }
+.dup-option { border:1px solid rgba(0,0,0,0.12); border-radius:4px; padding:14px; background:#f7f8fa; display:flex; flex-direction:column; gap:6px; min-width:0; }
+.dup-type { font-size:10px; font-weight:600; letter-spacing:0.12em; text-transform:uppercase; color:#6b7280; }
+.dup-name { font-size:13px; font-weight:600; word-break:break-word; }
+.dup-meta { font-size:11px; color:#6b7280; line-height:1.5; }
+.dup-badge { align-self:flex-start; font-size:10px; font-weight:600; padding:2px 7px; border-radius:3px; background:#edf6f1; color:#2e7d4f; }
+.dup-badge.warn { background:#fff8ec; color:#92570a; }
+.dup-option .btn { margin-top:auto; justify-content:center; }
+.dup-keep-both { background:none; border:none; color:#6b7280; font-family:'Inter',sans-serif; font-size:12px; cursor:pointer; text-decoration:underline; padding:0; }
+.dup-keep-both:hover { color:#1a202c; }
+@media (max-width:520px) { .dup-options { grid-template-columns:1fr; } }
+
 .review-section { background:var(--white); border-radius:5px; margin-bottom:12px; overflow:hidden; }
 .review-section::before { content:''; display:block; height:2px; background:var(--persimmon); }
 .review-section-header { background:#f7f8fa; color:#6b7280; font-size:10px; font-weight:600; letter-spacing:0.12em; text-transform:uppercase; padding:10px 16px; border-bottom:1px solid rgba(0,0,0,0.06); }
@@ -532,6 +552,17 @@ footer { border-top:1px solid var(--border); text-align:center; padding:22px; fo
 
 </div>
 
+<div class="dup-overlay" id="dup-overlay" role="dialog" aria-modal="true" aria-labelledby="dup-title">
+  <div class="dup-modal">
+    <div class="dup-body">
+      <div class="dup-eyebrow">Possible duplicate</div>
+      <div class="dup-title" id="dup-title"></div>
+      <div class="dup-options" id="dup-options"></div>
+      <button class="dup-keep-both" type="button" onclick="resolveDuplicate(null)">Keep both — they're different documents</button>
+    </div>
+  </div>
+</div>
+
 <footer>Verivest · Sales → Onboarding Handover · Internal Use Only</footer>
 
 <script>
@@ -582,13 +613,134 @@ function handleDrop(e, bucket) {
 }
 
 function handleFiles(files, bucket) {
+  const added = [];
   Array.from(files).forEach(file => {
     if (!buckets[bucket].find(f => f.name === file.name)) {
-      buckets[bucket].push({ file, name: file.name, status: 'pending', path: null });
+      const entry = { file, name: file.name, status: 'pending', path: null };
+      buckets[bucket].push(entry);
+      added.push(entry);
     }
   });
   renderFileList(bucket);
   uploadPending(bucket);
+  queueDuplicates(added, bucket);
+}
+
+// ── Duplicate documents ───────────────────────────────────────────────────
+// Fund, brownfield and Agora uploads are analyzed together, so a duplicate
+// across any of those sections counts; syndication and transcripts stand alone.
+const DUP_GROUP = { fund: 'fund', brownfield: 'fund', agora: 'fund', syndication: 'syndication', transcripts: 'transcripts' };
+const BUCKET_LABELS = { fund: 'Fund Documents', brownfield: 'Prior Admin Documents', agora: 'Agora / Portal Documents', syndication: 'Syndication Documents', transcripts: 'Call Transcripts' };
+const dupQueue = [];
+let dupCurrent = null;
+
+const fileExt = name => (name.match(/\.([^.]+)$/) || [, ''])[1].toLowerCase();
+
+// "OA - FINAL SIGNED.pdf", "oa_final_signed (1).docx" and "OA Final Signed copy.pdf" all map to "oa final signed"
+function docKey(name) {
+  return name.replace(/\.[^.]+$/, '').toLowerCase()
+    .replace(/\s*\(\d+\)\s*$/, '')
+    .replace(/[\s_-]*copy$/, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function fileTypeLabel(name) {
+  const ext = fileExt(name);
+  if (ext === 'pdf') return 'PDF';
+  if (ext === 'docx' || ext === 'doc') return 'Word document';
+  if (ext === 'xlsx' || ext === 'xls' || ext === 'csv') return 'spreadsheet';
+  if (ext === 'pptx') return 'PowerPoint';
+  if (ext === 'txt') return 'text file';
+  return ext ? ext.toUpperCase() + ' file' : 'file';
+}
+
+function locateEntry(entry) {
+  for (const [bucket, files] of Object.entries(buckets)) {
+    if (files.includes(entry)) return bucket;
+  }
+  return null;
+}
+
+function queueDuplicates(added, bucket) {
+  const group = DUP_GROUP[bucket];
+  // Compare each new file only against files uploaded before it, so every pair
+  // is queued once and the earlier upload is shown first
+  const seen = Object.entries(buckets)
+    .filter(([b]) => DUP_GROUP[b] === group)
+    .flatMap(([, files]) => files)
+    .filter(f => !added.includes(f) && fileExt(f.name) !== 'zip');
+  for (const entry of added) {
+    if (fileExt(entry.name) === 'zip') continue;
+    const key = docKey(entry.name);
+    const match = key && seen.find(f => docKey(f.name) === key);
+    if (match) dupQueue.push({ a: match, b: entry });
+    seen.push(entry);
+  }
+  showNextDuplicate();
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function describeOption(entry, label, index) {
+  const f = entry.file;
+  const size = f.size >= 1048576 ? (f.size / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(f.size / 1024)) + ' KB';
+  const modified = f.lastModified ? new Date(f.lastModified).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+  const badges = [];
+  if (/\b(signed|executed|final)\b/i.test(entry.name.replace(/[_-]/g, ' '))) badges.push('<span class="dup-badge">Name says final / signed</span>');
+  if (/\b(draft|redline)\b/i.test(entry.name.replace(/[_-]/g, ' '))) badges.push('<span class="dup-badge warn">Name says draft</span>');
+  if (fileExt(entry.name) === 'doc') badges.push('<span class="dup-badge warn">Old .doc format — text can\'t be read automatically</span>');
+  return `
+    <div class="dup-option">
+      <div class="dup-type">${escapeHtml(label)}</div>
+      <div class="dup-name">${escapeHtml(entry.name)}</div>
+      <div class="dup-meta">${size}${modified ? ' · modified ' + modified : ''}<br>${escapeHtml(BUCKET_LABELS[locateEntry(entry)] || '')}</div>
+      ${badges.join('')}
+      <button class="btn btn-primary" type="button" onclick="resolveDuplicate(${index})">Use this version</button>
+    </div>`;
+}
+
+function showNextDuplicate() {
+  if (dupCurrent) return;
+  while (dupQueue.length) {
+    const pair = dupQueue.shift();
+    // Skip pairs where either file was already removed by an earlier choice
+    if (!locateEntry(pair.a) || !locateEntry(pair.b)) continue;
+    dupCurrent = pair;
+
+    let labelA = fileTypeLabel(pair.a.name), labelB = fileTypeLabel(pair.b.name);
+    if (labelA === labelB) {
+      // Same type (e.g. the same PDF in two sections): tell them apart by section, then by upload order
+      const secA = BUCKET_LABELS[locateEntry(pair.a)], secB = BUCKET_LABELS[locateEntry(pair.b)];
+      if (secA !== secB) { labelA = `${labelA} in ${secA}`; labelB = `${labelB} in ${secB}`; }
+      else { labelA = `first ${labelA}`; labelB = `second ${labelB}`; }
+    }
+    const phrase = l => /^(first|second)/.test(l) ? `the ${l}` : `one ${l}`;
+    document.getElementById('dup-title').textContent =
+      `You've uploaded two versions of this: ${phrase(labelA)} and ${phrase(labelB)}. Proceed using which version?`;
+    document.getElementById('dup-options').innerHTML =
+      describeOption(pair.a, labelA, 0) + describeOption(pair.b, labelB, 1);
+    document.getElementById('dup-overlay').classList.add('open');
+    return;
+  }
+  document.getElementById('dup-overlay').classList.remove('open');
+}
+
+// index 0/1 keeps that file and removes the other; null keeps both
+function resolveDuplicate(index) {
+  const pair = dupCurrent;
+  dupCurrent = null;
+  if (pair && index !== null) {
+    const drop = index === 0 ? pair.b : pair.a;
+    const bucket = locateEntry(drop);
+    if (bucket) {
+      buckets[bucket].splice(buckets[bucket].indexOf(drop), 1);
+      renderFileList(bucket);
+    }
+  }
+  showNextDuplicate();
 }
 
 function removeFile(bucket, i) {
@@ -850,7 +1002,9 @@ async function submitHandover() {
     document.getElementById('ai-output-wrap').style.display = 'block';
     document.getElementById('ai-output').textContent = aiOutput;
 
-    const escapeHtml = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    if (result.duplicateFiles?.length) {
+      document.getElementById('result-status').innerHTML += `<div class="status-box warning" style="margin-top:8px;"><strong>Duplicate content detected</strong> — only one version of each was analyzed:<br>${result.duplicateFiles.map(d => '• ' + escapeHtml(d.name) + ' (' + d.similarity + '% match with ' + escapeHtml(d.keptName) + ')').join('<br>')}</div>`;
+    }
     if (result.skippedFiles?.length) {
       document.getElementById('result-status').innerHTML += `<div class="status-box warning" style="margin-top:8px;"><strong>Some files could not be read</strong> and were not included in the brief. They are listed in the task under Document Extraction Notes:<br>${result.skippedFiles.map(f => '• ' + escapeHtml(f.name) + ' (' + escapeHtml(f.reason) + ')').join('<br>')}</div>`;
     }
