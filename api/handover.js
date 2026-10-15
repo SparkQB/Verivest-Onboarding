@@ -419,14 +419,22 @@ function removeDuplicateDocuments(docs) {
 // Downloads and extracts every file in a bucket. Failures never throw — they're
 // collected in `skipped` so the brief can name them.
 async function downloadAndExtract(supabase, files) {
-  const empty = { text: '', included: [], skipped: [], duplicates: [] };
+  const empty = { text: '', included: [], skipped: [], duplicates: [], attachments: [] };
   if (!files || files.length === 0) return empty;
 
-  const perFile = await Promise.all(files.map(async ({ path, name }) => {
+  // Original files the form flagged to be attached to the ClickUp task (the
+  // contract). Kept even if their text can't be read or is a duplicate.
+  const attachments = [];
+
+  const perFile = await Promise.all(files.map(async ({ path, name, attach }) => {
     try {
       const { data, error } = await supabase.storage.from('onboarding-docs').download(path);
-      if (error) return [{ name, text: '', error: `download failed: ${error.message}` }];
+      if (error) {
+        if (attach) attachments.push({ name, error: `download failed: ${error.message}` });
+        return [{ name, text: '', error: `download failed: ${error.message}` }];
+      }
       const buffer = Buffer.from(await data.arrayBuffer());
+      if (attach) attachments.push({ name, buffer, type: data.type });
       return await extractFile(buffer, name);
     } catch (err) {
       return [{ name, text: '', error: err.message || String(err) }];
@@ -443,6 +451,7 @@ async function downloadAndExtract(supabase, files) {
     included: ok.map(r => r.name),
     skipped,
     duplicates,
+    attachments,
   };
 }
 
@@ -575,6 +584,35 @@ async function setCustomField(clickupKey, taskId, id, value) {
   return `HTTP ${res.status}: ${body.slice(0, 300)}`;
 }
 
+// Upload files to the task's attachments. Failures are reported, never thrown —
+// the task already exists and the rest of the handover should still succeed.
+async function attachFilesToTask(clickupKey, taskId, files) {
+  const attached = [];
+  const errors = [];
+  for (const file of files) {
+    if (file.error) {
+      errors.push({ name: file.name, error: file.error });
+      continue;
+    }
+    try {
+      const form = new FormData();
+      form.append('attachment', new Blob([file.buffer], { type: file.type || 'application/octet-stream' }), file.name);
+      const res = await fetch(`https://api.clickup.com/api/v2/task/${taskId}/attachment`, {
+        method: 'POST',
+        headers: { 'Authorization': clickupKey },
+        body: form
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text().catch(() => '')).slice(0, 300)}`);
+      attached.push(file.name);
+      console.log(`[clickup] attached ${file.name} (${file.buffer.length} bytes)`);
+    } catch (err) {
+      console.error(`[clickup] attaching ${file.name} failed: ${err.message}`);
+      errors.push({ name: file.name, error: err.message });
+    }
+  }
+  return { attached, errors };
+}
+
 // Merge a Claude-extracted value into a field that Sales may have already filled
 // in on the form, so the two don't race each other as separate writes.
 function mergeField(fields, id, extracted, heading) {
@@ -658,7 +696,7 @@ export default async function handler(req, res) {
       : null;
 
     // ── Extract text from each bucket in parallel ──
-    const noFiles = { text: '', included: [], skipped: [], duplicates: [] };
+    const noFiles = { text: '', included: [], skipped: [], duplicates: [], attachments: [] };
     const [fundDocs, transcripts, syndication] = await Promise.all([
       supabase && buckets?.fundDocs?.length ? downloadAndExtract(supabase, buckets.fundDocs) : noFiles,
       supabase && buckets?.transcripts?.length ? downloadAndExtract(supabase, buckets.transcripts) : noFiles,
@@ -744,8 +782,11 @@ export default async function handler(req, res) {
     }
     mergeField(fields, SCOPE_FIELD_ID, extractedScope, 'From call transcripts');
 
-    // ── Update custom fields individually ──
-    const fieldErrors = await updateCustomFields(CLICKUP_KEY, CLICKUP_LIST, taskId, fields);
+    // ── Update custom fields and attach contract files ──
+    const [fieldErrors, attachmentResults] = await Promise.all([
+      updateCustomFields(CLICKUP_KEY, CLICKUP_LIST, taskId, fields),
+      attachFilesToTask(CLICKUP_KEY, taskId, [...fundDocs.attachments, ...transcripts.attachments, ...syndication.attachments]),
+    ]);
 
     return res.status(200).json({
       brief,
@@ -753,6 +794,8 @@ export default async function handler(req, res) {
       taskUrl: `https://app.clickup.com/t/${taskId}`,
       skippedFiles,
       duplicateFiles,
+      attachedFiles: attachmentResults.attached,
+      attachmentErrors: attachmentResults.errors,
       fieldErrors
     });
 

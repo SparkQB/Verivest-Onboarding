@@ -96,6 +96,7 @@ input::placeholder, textarea::placeholder { color:#c0c4ce; }
 .file-item-status.uploading { background:#fff8ec; color:#92570a; }
 .file-item-status.done { background:#edf6f1; color:#2e7d4f; }
 .file-item-status.error { background:#fde8e8; color:#8b1a1a; }
+.file-item-attach { font-size:11px; padding:3px 8px; border-radius:3px; background:#eef2ff; color:#3949ab; white-space:nowrap; }
 .file-item-remove { background:none; border:none; color:#6b7280; cursor:pointer; font-size:18px; line-height:1; padding:0 4px; }
 
 /* Duplicate document prompt */
@@ -748,6 +749,15 @@ function removeFile(bucket, i) {
   renderFileList(bucket);
 }
 
+// Contracts are attached to the ClickUp task as well as read by Claude. Matched by
+// file name: Verivest's own service contract, not the fund's governing documents.
+function isContract(name) {
+  const n = name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ');
+  if (/\b(operating|subscription|partnership|lpa|side letter)\b/i.test(n)) return false;
+  return /\b(contract|engagement letter|services? agreement|admin(istration)? agreement|master services|msa|sow|statement of work|order form|fee agreement)\b/i.test(n)
+    || (/\bverivest\b/i.test(n) && /\bagreement\b/i.test(n));
+}
+
 function renderFileList(bucket) {
   const el = document.getElementById('file-list-' + bucket);
   if (!el) return;
@@ -755,7 +765,8 @@ function renderFileList(bucket) {
   if (files.length === 0) { el.innerHTML = ''; return; }
   el.innerHTML = files.map((f, i) => `
     <div class="file-item">
-      <span class="file-item-name">${f.name}</span>
+      <span class="file-item-name">${escapeHtml(f.name)}</span>
+      ${isContract(f.name) ? '<span class="file-item-attach" title="Contracts are attached to the ClickUp task">📎 Will attach to ClickUp</span>' : ''}
       <span class="file-item-status ${f.status}">${f.status === 'done' ? '✓ Uploaded' : f.status === 'uploading' ? 'Uploading...' : f.status === 'error' ? 'Error' : 'Pending'}</span>
       <button class="file-item-remove" onclick="removeFile('${bucket}',${i})">×</button>
     </div>
@@ -919,7 +930,7 @@ async function submitHandover() {
   let aiOutput = '';
   try {
     // Build bucket file lists (uploaded only)
-    const getUploaded = bucket => buckets[bucket].filter(f => f.status === 'done').map(f => ({ path: f.path, name: f.name }));
+    const getUploaded = bucket => buckets[bucket].filter(f => f.status === 'done').map(f => ({ path: f.path, name: f.name, attach: isContract(f.name) }));
 
     // Combine fund + brownfield + agora into fundDocs bucket for the backend
     const fundDocs = [...getUploaded('fund'), ...getUploaded('brownfield'), ...getUploaded('agora')];
@@ -1002,6 +1013,12 @@ async function submitHandover() {
     document.getElementById('ai-output-wrap').style.display = 'block';
     document.getElementById('ai-output').textContent = aiOutput;
 
+    if (result.attachedFiles?.length) {
+      document.getElementById('result-status').innerHTML += `<div class="status-box success" style="margin-top:8px;"><strong>📎 Attached to the ClickUp task:</strong><br>${result.attachedFiles.map(n => '• ' + escapeHtml(n)).join('<br>')}</div>`;
+    }
+    if (result.attachmentErrors?.length) {
+      document.getElementById('result-status').innerHTML += `<div class="status-box warning" style="margin-top:8px;"><strong>These files could not be attached to the ClickUp task</strong> — please add them manually:<br>${result.attachmentErrors.map(f => '• ' + escapeHtml(f.name)).join('<br>')}</div>`;
+    }
     if (result.duplicateFiles?.length) {
       document.getElementById('result-status').innerHTML += `<div class="status-box warning" style="margin-top:8px;"><strong>Duplicate content detected</strong> — only one version of each was analyzed:<br>${result.duplicateFiles.map(d => '• ' + escapeHtml(d.name) + ' (' + d.similarity + '% match with ' + escapeHtml(d.keptName) + ')').join('<br>')}</div>`;
     }
