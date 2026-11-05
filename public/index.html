@@ -99,6 +99,21 @@ input::placeholder, textarea::placeholder { color:#c0c4ce; }
 .file-item-attach { font-size:11px; padding:3px 8px; border-radius:3px; background:#eef2ff; color:#3949ab; white-space:nowrap; }
 .file-item-remove { background:none; border:none; color:#6b7280; cursor:pointer; font-size:18px; line-height:1; padding:0 4px; }
 
+/* HubSpot pre-fill */
+.hs-row { display:grid; grid-template-columns:1fr 1fr auto; gap:12px; align-items:end; }
+.hs-row .btn { height:40px; white-space:nowrap; }
+.hs-help { margin-top:12px; font-size:12px; color:#4a5568; }
+.hs-help summary { cursor:pointer; color:#3949ab; font-weight:600; font-size:12px; }
+.hs-help ol { margin:8px 0 0 18px; line-height:1.6; }
+.hs-help code { background:#f1f3f7; padding:1px 4px; border-radius:3px; font-size:11px; word-break:break-all; }
+.hs-status { margin-top:14px; font-size:12px; line-height:1.55; border-radius:4px; padding:10px 12px; display:none; }
+.hs-status.ok { display:block; background:#edf6f1; color:#1f5f3b; }
+.hs-status.err { display:block; background:#fde8e8; color:#8b1a1a; }
+.hs-status ul { margin:6px 0 0 16px; }
+.hs-status .hs-warn { color:#92570a; }
+.hs-tag { display:inline-block; margin-left:6px; font-size:9px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#c2410c; background:#fff1e8; padding:1px 5px; border-radius:3px; vertical-align:middle; }
+@media (max-width:640px) { .hs-row { grid-template-columns:1fr; } }
+
 /* Sign-in */
 .nav-user { display:flex; align-items:center; gap:12px; }
 .nav-user-email { font-size:12px; color:var(--gray-light); }
@@ -219,6 +234,31 @@ footer { border-top:1px solid var(--border); text-align:center; padding:22px; fo
     <div class="page-eyebrow">Step 1 of 6</div>
     <h1 class="page-title">Client Information</h1>
     <p class="page-sub">Basic deal and contact details.</p>
+
+    <div class="section-card">
+      <div class="section-card-title">Start from HubSpot</div>
+      <p class="section-card-sub">Paste the deal and we'll fill in steps 1–3 from HubSpot and the Sales New Deal Playbook. Review everything before submitting.</p>
+      <div class="hs-row">
+        <div class="field" style="margin-bottom:0">
+          <label for="hs_deal">HubSpot deal link or Record ID</label>
+          <input type="text" id="hs_deal" placeholder="https://app.hubspot.com/contacts/…/record/0-3/…">
+        </div>
+        <div class="field" style="margin-bottom:0">
+          <label for="hs_entity">Entity link or Record ID <span style="font-weight:400;color:#6b7280">(optional)</span></label>
+          <input type="text" id="hs_entity" placeholder="Only if the deal has no Entity linked">
+        </div>
+        <button class="btn btn-primary" type="button" id="hs_pull" onclick="pullFromHubSpot()">Pull from HubSpot</button>
+      </div>
+      <details class="hs-help">
+        <summary>Where do I find the Record ID?</summary>
+        <ol>
+          <li><strong>From the link:</strong> open the deal (or Entity) in HubSpot and copy the address from your browser. It looks like <code>app.hubspot.com/contacts/5708692/record/0-3/64623979691</code> — the <strong>last string of numbers</strong> is the Record ID. You can paste the whole link; we pick out the ID.</li>
+          <li><strong>From the record:</strong> on the deal or Entity page, click <strong>Actions → View all properties</strong> and search for <strong>Record ID</strong>. Tip: add Record ID to the left sidebar so it's always visible.</li>
+          <li>The Entity is found automatically when it's linked to the deal. Only paste it if we say none is linked, or the wrong one was picked.</li>
+        </ol>
+      </details>
+      <div class="hs-status" id="hs_status"></div>
+    </div>
 
     <div class="section-card">
       <div class="section-card-title">Deal Details</div>
@@ -680,6 +720,97 @@ async function apiFetch(url, options = {}) {
 
 renderUser();
 
+// ── HubSpot pre-fill ──────────────────────────────────────────────────────
+// Free-text notes from HubSpot (playbook + other notes); sent with the
+// submission so Claude can read them. Cleared when a different deal is pulled.
+let hubspotNotes = '';
+
+function markFromHubSpot(el) {
+  const label = el.closest('.field')?.querySelector('label');
+  if (label && !label.querySelector('.hs-tag')) label.insertAdjacentHTML('beforeend', '<span class="hs-tag">HubSpot</span>');
+}
+
+function clearHubSpotTags() {
+  document.querySelectorAll('.hs-tag').forEach(t => t.remove());
+}
+
+function setRadio(name, value) {
+  const input = document.querySelector(`.radio-opt input[name="${name}"][value="${value}"]`);
+  if (!input) return false;
+  document.querySelectorAll(`.radio-opt input[name="${name}"]`).forEach(i => i.closest('.radio-opt').classList.remove('selected'));
+  input.checked = true;
+  input.closest('.radio-opt').classList.add('selected');
+  return true;
+}
+
+// Visible fields on steps 1-3 that are still empty after a pull
+function emptyFieldLabels() {
+  const out = [];
+  document.querySelectorAll('#page-0 .field, #page-1 .field, #page-2 .field').forEach(f => {
+    if (f.closest('[style*="display: none"]') || f.querySelector('#hs_deal, #hs_entity')) return;
+    // Syndication Type only matters for syndication services
+    if (f.querySelector('#syndication_type') && !/syndication/i.test(getVal('service'))) return;
+    const label = f.querySelector('label')?.childNodes[0]?.textContent.trim();
+    const input = f.querySelector('input:not([type="radio"]), select, textarea');
+    const radios = f.querySelectorAll('input[type="radio"]');
+    const empty = radios.length ? ![...radios].some(r => r.checked) : input && !input.value.trim();
+    if (label && empty) out.push(label);
+  });
+  return out;
+}
+
+async function pullFromHubSpot() {
+  const btn = document.getElementById('hs_pull');
+  const status = document.getElementById('hs_status');
+  const deal = getVal('hs_deal');
+  if (!deal) { status.className = 'hs-status err'; status.textContent = 'Paste a HubSpot deal link or Record ID first.'; return; }
+
+  btn.disabled = true; btn.textContent = 'Pulling…';
+  status.className = 'hs-status'; status.textContent = '';
+  try {
+    const res = await apiFetch('/api/hubspot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deal, entity: getVal('hs_entity') })
+    });
+    if (res.status === 401) return;
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Could not read from HubSpot.');
+
+    clearHubSpotTags();
+    let filled = 0;
+    for (const [id, value] of Object.entries(data.fields || {})) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      if (el.tagName === 'SELECT' && ![...el.options].some(o => o.value === value || o.text === value)) continue;
+      el.value = value;
+      markFromHubSpot(el);
+      filled++;
+    }
+    for (const [name, value] of Object.entries(data.radios || {})) {
+      if (setRadio(name, value)) { markFromHubSpot(document.querySelector(`input[name="${name}"]`)); filled++; }
+    }
+    updateConditionals();
+    hubspotNotes = data.crmNotes || '';
+
+    const missing = emptyFieldLabels();
+    const esc = escapeHtml;
+    status.className = 'hs-status ok';
+    status.innerHTML =
+      `<strong>✓ Filled ${filled} field${filled === 1 ? '' : 's'} from “${esc(data.dealName || 'deal')}”</strong>` +
+      (data.entityName ? ` · Entity: ${esc(data.entityName)}` : '') +
+      `<br>${data.hasPlaybook ? 'Sales New Deal Playbook found.' : '<span class="hs-warn"><strong>No Sales New Deal Playbook on this deal.</strong></span>'}` +
+      ` ${data.notesCount ? `${data.notesCount} HubSpot note${data.notesCount === 1 ? '' : 's'} will be included for Claude.` : ''}` +
+      (data.warnings?.length ? `<ul class="hs-warn">${data.warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul>` : '') +
+      (missing.length ? `<div style="margin-top:6px"><strong>Not in HubSpot — please fill in:</strong> ${missing.map(esc).join(', ')}</div>` : '');
+  } catch (err) {
+    status.className = 'hs-status err';
+    status.textContent = err.message;
+  } finally {
+    btn.disabled = false; btn.textContent = 'Pull from HubSpot';
+  }
+}
+
 // ── Supabase ──────────────────────────────────────────────────────────────
 const SUPABASE_URL = 'https://bxjtftykcnlbcnhykoch.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ4anRmdHlrY25sYmNuaHlrb2NoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODczNDY1MjEsImV4cCI6MjEwMjkyMjUyMX0.WqYi2pZEmwJhByC8Y5cBNczDTKxeNZoU-u4TB8S3oxM';
@@ -1112,7 +1243,8 @@ async function submitHandover() {
         formData: compileFormData(),
         entityName: getVal('entity_name'),
         customFields: customFields.filter(f => f.value !== undefined && f.value !== '' && f.value !== null),
-        buckets: { fundDocs: fundDocs, transcripts: transcripts, syndication: syndication }
+        buckets: { fundDocs: fundDocs, transcripts: transcripts, syndication: syndication },
+        crmNotes: hubspotNotes
       })
     });
 

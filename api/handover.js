@@ -72,7 +72,7 @@ RULES:
 
 const PROMPT_TRANSCRIPTS = `You are the Verivest Handover Brief Agent analyzing sales call transcripts for a new client handover.
 
-Transcripts are your primary source. The form fields are a starting point — the transcripts are the truth. Read every transcript carefully and produce ONE section:
+Transcripts are your primary source. The form fields are a starting point — the transcripts are the truth. If HubSpot CRM notes are included (the Sales New Deal Playbook and other deal/entity notes), treat them as a primary source too: Sales' own notes often hold commitments, timelines and client context not in the form. When you cite a commitment, say whether it came from a call transcript or a HubSpot note. Read every transcript and note carefully and produce ONE section:
 
 ---
 
@@ -688,7 +688,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { formData, customFields, entityName, buckets } = req.body;
+    const { formData, customFields, entityName, buckets, crmNotes } = req.body;
     // buckets = { fundDocs: [{path, name}], transcripts: [{path, name}], syndication: [{path, name}] }
 
     const supabase = (SUPABASE_URL && SUPABASE_SERVICE_KEY)
@@ -709,7 +709,10 @@ export default async function handler(req, res) {
     // Each call always runs on the form data; unreadable files are listed, not sent.
     const fundDocsInput = buildClaudeInput(formData, 'FUND DOCUMENTS', fundDocs,
       fundDocs.skipped.length ? '[No readable fund documents — see list of unreadable files above]' : '[No fund documents uploaded]');
-    const transcriptInput = buildClaudeInput(formData, 'CALL TRANSCRIPTS', transcripts,
+    // HubSpot notes (pulled on the form) go to the client-context call, ahead of the transcripts
+    const crmText = typeof crmNotes === 'string' ? sanitizeText(crmNotes).slice(0, 40000) : '';
+    const formWithCrm = crmText ? `${formData}\n\n=== HUBSPOT CRM NOTES (Sales New Deal Playbook and other deal/entity notes) ===\n${crmText}` : formData;
+    const transcriptInput = buildClaudeInput(formWithCrm, 'CALL TRANSCRIPTS', transcripts,
       transcripts.skipped.length ? '[No readable transcripts — see list of unreadable files above]' : '[No transcripts uploaded]');
 
     const claudePromises = [
