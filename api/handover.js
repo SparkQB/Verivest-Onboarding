@@ -7,6 +7,7 @@ import { extractText as unpdfExtractText, getDocumentProxy } from 'unpdf';
 import mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
+import { requireSession } from './_auth.js';
 
 export const config = { maxDuration: 300 };
 
@@ -671,11 +672,10 @@ async function updateCustomFields(clickupKey, listId, taskId, customFields) {
 // ── MAIN HANDLER ─────────────────────────────────────────────────────────────
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  const user = requireSession(req, res);
+  if (!user) return;
 
   const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
   const CLICKUP_KEY = process.env.CLICKUP_API_KEY;
@@ -768,7 +768,7 @@ export default async function handler(req, res) {
     const clickupRes = await fetch(`https://api.clickup.com/api/v2/list/${CLICKUP_LIST}/task`, {
       method: 'POST',
       headers: { 'Authorization': CLICKUP_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: entityName, description: brief, status: 'pending sales review' })
+      body: JSON.stringify({ name: entityName, description: `Submitted by: ${user.email}\n\n${brief}`, status: 'pending sales review' })
     });
 
     const clickupData = await clickupRes.json();
