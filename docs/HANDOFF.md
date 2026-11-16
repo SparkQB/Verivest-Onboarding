@@ -20,7 +20,7 @@ On submit it:
 |---|---|
 | Code | GitHub `SparkQB/Verivest-Onboarding`, branch `main` |
 | Hosting | Vercel project `verivest-onboarding` (team "admin-69135851's projects"), Pro plan, deploys automatically from `main` |
-| Files | Supabase project, bucket `onboarding-docs`; `api/cleanup.js` cron is meant to delete uploads older than 15 days (1st and 16th of each month, 09:00 UTC) — see Known limitations |
+| Files | Supabase project "Verivest Onboarding" (ref `bxjtftykcnlbcnhykoch`), bucket `onboarding-docs`. Uploads are deleted right after their ClickUp task is created; `api/cleanup.js` runs daily at 09:00 UTC and removes anything older than 3 days |
 | AI | Anthropic API, model `claude-sonnet-4-5`, prepaid credits with auto-reload |
 | Tasks | ClickUp list `901702902471` |
 | CRM | HubSpot account `5708692` (read-only) |
@@ -34,7 +34,7 @@ On submit it:
 | `api/hubspot.js` | Reads a HubSpot deal and returns form values plus notes for Claude |
 | `api/login.js` | Checks @verivest.com email plus team password, issues a 30-day session |
 | `api/_auth.js` | Shared session helpers (the `_` prefix means Vercel doesn't expose it as an endpoint) |
-| `api/cleanup.js` | Cron: deletes old Supabase uploads (protected by `CRON_SECRET`) |
+| `api/cleanup.js` | Daily cron: deletes Supabase uploads older than 3 days (protected by `CRON_SECRET`) |
 | `vercel.json` | Function timeouts, cron schedule, output directory |
 
 ## Environment variables (set in Vercel → Settings → Environment Variables)
@@ -48,7 +48,7 @@ Names only; values live in Vercel and are marked Sensitive.
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY` | File downloads (server) |
 | `SITE_PASSWORD` | Team sign-in password (Production, Preview, Development) |
 | `HUBSPOT_TOKEN` | HubSpot **service key** (Production, Preview, Development) |
-| `CRON_SECRET` | Cleanup cron auth — **not set as of 2026-11-16** (see Known limitations) |
+| `CRON_SECRET` | Cleanup cron auth (Vercel sends it automatically) — **not set as of 2026-11-16**; the job refuses to run until it is |
 
 The Supabase URL and the *public* anon key are also hard-coded in
 `public/index.html` for browser uploads. That's normal for Supabase anon keys.
@@ -110,13 +110,9 @@ now show the real reason in the brief and the Vercel logs.
 
 ## Known limitations / ideas not built
 
-- **Cleanup cron is probably not running.** `api/cleanup.js` rejects requests
-  unless the `Authorization` header equals `Bearer <CRON_SECRET>`, and
-  `CRON_SECRET` is not set in Vercel, so Vercel's scheduled call is most
-  likely rejected (401) and old uploads stay in Supabase. This predates the
-  work above. Fix: add a random `CRON_SECRET` in Vercel (Production) and
-  redeploy; Vercel then sends it automatically. Check the next run (1st/16th,
-  09:00 UTC) in Vercel → Logs.
+- **Cleanup cron never worked before 2026-11-16.** `CRON_SECRET` was unset
+  and the job only listed the bucket root. Fixed in code (see Security
+  review, step 2); it still needs `CRON_SECRET` set in Vercel.
 
 - Each document group sent to Claude is capped at 150K characters. Ideas
   discussed: share the space fairly across documents instead of cutting the
@@ -161,9 +157,9 @@ protection and for assurance that no AI provider trains on the documents.
 
 | # | Step | Status |
 |---|---|---|
-| 1 | Remove the anon download policy: `drop policy if exists "Allow anon downloads 1l9vkj1_0" on storage.objects;` | **PENDING** — the first attempt timed out waiting for the owner to approve the Supabase prompt. Run it first. |
-| 2 | Delete all files older than **3 days**. Must go through the Storage API (service-role key); deleting rows from `storage.objects` with SQL does not remove the stored files. Plan: change `api/cleanup.js` retention from 15 days to **3 days**; owner adds `CRON_SECRET` (any long random string) in Vercel (Production) and redeploys; owner clicks **Run** on the job in Vercel → Settings → Cron Jobs; confirm with `select count(*), min(created_at) from storage.objects where bucket_id='onboarding-docs';` | Not started |
-| 3 | **Auto-delete after each handover:** in `api/handover.js`, once the ClickUp task is created successfully, delete that submission's files from Supabase (service-role key). The contract stays on the ClickUp task. The 3-day cron remains as a safety net for abandoned uploads. | Not started |
+| 1 | Remove the anon download policy: `drop policy if exists "Allow anon downloads 1l9vkj1_0" on storage.objects;` | **DONE 2026-11-16.** Verified: as the `anon` role, 0 of 182 files are visible. Only "Allow anon uploads" remains. |
+| 2 | Delete all files older than **3 days**. Must go through the Storage API (service-role key); deleting rows from `storage.objects` with SQL does not remove the stored files. `api/cleanup.js` rewritten: walks every folder (the old version only listed the bucket root, so it never found the files in `fund/`, `transcripts/`…), keeps **3 days**, refuses to run without `CRON_SECRET`, runs **daily** at 09:00 UTC (`vercel.json`). Remaining: owner adds `CRON_SECRET` (any long random string) in Vercel (Production); deploy; owner clicks **Run** in Vercel → Settings → Cron Jobs; confirm with `select count(*), min(created_at) from storage.objects where bucket_id='onboarding-docs';` | **Code done and tested;** waiting on `CRON_SECRET` + deploy + first run |
+| 3 | **Auto-delete after each handover:** in `api/handover.js`, once the ClickUp task is created successfully, delete that submission's files from Supabase (service-role key). The contract stays on the ClickUp task. The 3-day cron remains as a safety net for abandoned uploads. Files are only deleted after the task exists; if ClickUp task creation fails, nothing is deleted. | **Code done and tested** (`deleteUploads` in `api/handover.js`); deploys with step 2 |
 | 4 | Signed-in-only uploads: server issues one-time signed upload URLs (`createSignedUploadUrl`) to signed-in users; then drop the anon upload policy so the public key can do nothing. | Recommended, not yet approved |
 | 5 | Company-owned Anthropic API key (company Console org) in `ANTHROPIC_API_KEY`; ask Anthropic about zero data retention if required | Owner to decide |
 | 6 | Check AI/data settings in ClickUp ("ClickUp Brain") and HubSpot ("Breeze"), and who can see the ClickUp list | Owner to check |
