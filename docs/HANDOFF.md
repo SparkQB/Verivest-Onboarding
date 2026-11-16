@@ -1,9 +1,10 @@
 # Verivest Handover — project synopsis
 
-> **Open security work:** see "Security review — 2026-11-16" below. Step 1 is urgent.
+> **Security work:** steps 1–4 of "Security review — 2026-11-16" are done and verified; steps 5–7 are owner decisions.
 
 Written 2026-11-16 to hand this project to a new Claude account. Everything
-below reflects production as of commit `76d48ea` on `main`.
+below reflects production as of the merge of
+[SparkQB/Verivest-Onboarding#1](https://github.com/SparkQB/Verivest-Onboarding/pull/1) (`dd9cd35`) on `main`.
 
 ## What the app is
 
@@ -33,6 +34,7 @@ On submit it:
 | `api/handover.js` | Main function (300s timeout): extraction → Claude → ClickUp |
 | `api/hubspot.js` | Reads a HubSpot deal and returns form values plus notes for Claude |
 | `api/login.js` | Checks @verivest.com email plus team password, issues a 30-day session |
+| `api/upload-url.js` | Gives signed-in users a one-time signed upload URL; the server picks the storage path |
 | `api/_auth.js` | Shared session helpers (the `_` prefix means Vercel doesn't expose it as an endpoint) |
 | `api/cleanup.js` | Daily cron: deletes Supabase uploads older than 3 days (protected by `CRON_SECRET`) |
 | `vercel.json` | Function timeouts, cron schedule, output directory |
@@ -48,10 +50,12 @@ Names only; values live in Vercel and are marked Sensitive.
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY` | File downloads (server) |
 | `SITE_PASSWORD` | Team sign-in password (Production, Preview, Development) |
 | `HUBSPOT_TOKEN` | HubSpot **service key** (Production, Preview, Development) |
-| `CRON_SECRET` | Cleanup cron auth (Vercel sends it automatically) — **not set as of 2026-11-16**; the job refuses to run until it is |
+| `CRON_SECRET` | Cleanup cron auth (Vercel sends it automatically). Set 2026-11-16; the job refuses to run without it |
 
 The Supabase URL and the *public* anon key are also hard-coded in
-`public/index.html` for browser uploads. That's normal for Supabase anon keys.
+`public/index.html`. Since 2026-11-16 the anon key has no storage policies,
+so it can't read or write files; uploads use one-time signed URLs from
+`api/upload-url.js`.
 
 ## What was built, in order
 
@@ -110,10 +114,6 @@ now show the real reason in the brief and the Vercel logs.
 
 ## Known limitations / ideas not built
 
-- **Cleanup cron never worked before 2026-11-16.** `CRON_SECRET` was unset
-  and the job only listed the bucket root. Fixed in code (see Security
-  review, step 2); it still needs `CRON_SECRET` set in Vercel.
-
 - Each document group sent to Claude is capped at 150K characters. Ideas
   discussed: share the space fairly across documents instead of cutting the
   tail, raise the cap, or switch to `claude-sonnet-5` (cheaper, larger context).
@@ -122,15 +122,13 @@ now show the real reason in the brief and the Vercel logs.
 - The contract is detected by file name only. A contract named e.g.
   `CityPads_final.pdf` won't be attached.
 - `.doc` (old Word) files aren't readable; `.docx` is.
-- Browser uploads go straight to Supabase with the public anon key. The site
-  sign-in hides the form, but Supabase storage policies were not tightened.
 - The sign-in is one shared password. An upgrade path discussed:
   "Sign in with Google" limited to @verivest.com.
 - When Claude fails, the task is still created and the form still shows
   success; only the brief text says the analysis failed.
 - Cost: roughly $0.15–$0.40 of Claude usage per handover.
 
-## Security review — 2026-11-16 (IN PROGRESS)
+## Security review — 2026-11-16 (steps 1–4 done)
 
 Sensitive client documents (PPMs, operating/subscription agreements,
 financials, transcripts) pass through this app. The owner asked for stronger
@@ -158,12 +156,12 @@ protection and for assurance that no AI provider trains on the documents.
 | # | Step | Status |
 |---|---|---|
 | 1 | Remove the anon download policy: `drop policy if exists "Allow anon downloads 1l9vkj1_0" on storage.objects;` | **DONE 2026-11-16.** Verified: as the `anon` role, 0 of 182 files are visible. Only "Allow anon uploads" remains. |
-| 2 | Delete all files older than **3 days**. Must go through the Storage API (service-role key); deleting rows from `storage.objects` with SQL does not remove the stored files. `api/cleanup.js` rewritten: walks every folder (the old version only listed the bucket root, so it never found the files in `fund/`, `transcripts/`…), keeps **3 days**, refuses to run without `CRON_SECRET`, runs **daily** at 09:00 UTC (`vercel.json`). Remaining: owner adds `CRON_SECRET` (any long random string) in Vercel (Production); deploy; owner clicks **Run** in Vercel → Settings → Cron Jobs; confirm with `select count(*), min(created_at) from storage.objects where bucket_id='onboarding-docs';` | **Code done and tested;** waiting on `CRON_SECRET` + deploy + first run |
-| 3 | **Auto-delete after each handover:** in `api/handover.js`, once the ClickUp task is created successfully, delete that submission's files from Supabase (service-role key). The contract stays on the ClickUp task. The 3-day cron remains as a safety net for abandoned uploads. Files are only deleted after the task exists; if ClickUp task creation fails, nothing is deleted. | **Code done and tested** (`deleteUploads` in `api/handover.js`); deploys with step 2 |
-| 4 | Signed-in-only uploads: server issues one-time signed upload URLs (`createSignedUploadUrl`) to signed-in users; then drop the anon upload policy so the public key can do nothing. | **Code done and tested** on branch `claude/happy-babbage-n7r3d5`: new `api/upload-url.js` (requires sign-in, server picks the path), `public/index.html` uploads with `uploadToSignedUrl`, and `api/handover.js` only accepts paths the form creates. Remaining: merge to `main` and deploy, test one upload on the live site, **then** run `drop policy if exists "Allow anon uploads 1l9vkj1_0" on storage.objects;` in Supabase → SQL Editor. Dropping the policy before the deploy would break uploads. |
-| 5 | Company-owned Anthropic API key (company Console org) in `ANTHROPIC_API_KEY`; ask Anthropic about zero data retention if required | Owner to decide |
-| 6 | Check AI/data settings in ClickUp ("ClickUp Brain") and HubSpot ("Breeze"), and who can see the ClickUp list | Owner to check |
-| 7 | Optional: per-person "Sign in with Google" (@verivest.com) instead of the shared password | Idea only |
+| 2 | Delete all files older than **3 days** via the Storage API. `api/cleanup.js` walks every folder, keeps 3 days, refuses to run without `CRON_SECRET`, runs daily at 09:00 UTC. | **DONE 2026-11-16.** `CRON_SECRET` set, deployed, first run took the bucket from 182 files to 1 (the owner's test upload). |
+| 3 | **Auto-delete after each handover:** once the ClickUp task exists, `deleteUploads` in `api/handover.js` removes that submission's files (a contract that failed to attach is kept). The 3-day cron is the safety net. | **DONE 2026-11-16** (deployed). Not yet seen on a real submission: on the next handover, check Vercel logs for `[storage] deleted N of N`. |
+| 4 | Signed-in-only uploads: `api/upload-url.js` issues one-time signed upload URLs to signed-in users; the form uploads with `uploadToSignedUrl`; `api/handover.js` only accepts paths the form creates. | **DONE 2026-11-16.** Deployed, then policy "Allow anon uploads 1l9vkj1_0" dropped. The anon key now has no storage access. Upload on the live site verified after the drop. |
+| 5 | Company-owned Anthropic API key (company Console org) in `ANTHROPIC_API_KEY`; ask Anthropic about zero data retention if required | Optional; not pursued as of 2026-11-16 |
+| 6 | Check AI/data settings in ClickUp ("ClickUp Brain") and HubSpot ("Breeze"), and who can see the ClickUp list | Optional. Both are company accounts; their AI settings are left to the company's ClickUp/HubSpot admins. Doesn't affect the app. |
+| 7 | Optional: per-person "Sign in with Google" (@verivest.com) instead of the shared password | Optional; idea only |
 
 ### AI training — what was said (verify against current terms)
 
@@ -208,6 +206,6 @@ the site keeps working throughout the move.
    environment, and delete its `verivest-onboarding` environment if it's no
    longer wanted. Optionally rotate the HubSpot service key (HubSpot →
    Development → Keys) and update `HUBSPOT_TOKEN` in Vercel, then redeploy.
-6. **Finish the open security steps** in "Security review — 2026-11-16" (step 1 first).
+6. **Security steps 1–4 are done.** Steps 5–7 in "Security review — 2026-11-16" are owner decisions.
 7. **Give a new Claude session this file first**: "Read docs/HANDOFF.md" is
    enough context to continue.
