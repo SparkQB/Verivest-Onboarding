@@ -585,6 +585,21 @@ async function setCustomField(clickupKey, taskId, id, value) {
   return `HTTP ${res.status}: ${body.slice(0, 300)}`;
 }
 
+// Removes uploaded files from storage. Never throws: a failed delete is logged
+// and left for the daily cleanup job.
+async function deleteUploads(supabase, paths) {
+  if (!paths.length) return 0;
+  try {
+    const { data, error } = await supabase.storage.from('onboarding-docs').remove(paths);
+    if (error) throw error;
+    console.log(`[storage] deleted ${data?.length ?? 0} of ${paths.length} uploaded files`);
+    return data?.length ?? 0;
+  } catch (err) {
+    console.error(`[storage] could not delete uploads (daily cleanup will remove them): ${err.message}`);
+    return 0;
+  }
+}
+
 // Upload files to the task's attachments. Failures are reported, never thrown —
 // the task already exists and the rest of the handover should still succeed.
 async function attachFilesToTask(clickupKey, taskId, files) {
@@ -688,7 +703,16 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { formData, customFields, entityName, buckets, crmNotes } = req.body;
+    const { formData, customFields, entityName, crmNotes } = req.body;
+    // Only accept paths the upload form creates (folder/file, one level deep),
+    // so a caller can't make the server read or delete other objects.
+    const UPLOAD_PATH = /^(fund|brownfield|agora|syndication|transcripts)\/[A-Za-z0-9._-]+$/;
+    const onlyUploads = list => (Array.isArray(list) ? list : []).filter(f => typeof f?.path === 'string' && UPLOAD_PATH.test(f.path));
+    const buckets = {
+      fundDocs: onlyUploads(req.body.buckets?.fundDocs),
+      transcripts: onlyUploads(req.body.buckets?.transcripts),
+      syndication: onlyUploads(req.body.buckets?.syndication),
+    };
     // buckets = { fundDocs: [{path, name}], transcripts: [{path, name}], syndication: [{path, name}] }
 
     const supabase = (SUPABASE_URL && SUPABASE_SERVICE_KEY)
@@ -791,6 +815,16 @@ export default async function handler(req, res) {
       attachFilesToTask(CLICKUP_KEY, taskId, [...fundDocs.attachments, ...transcripts.attachments, ...syndication.attachments]),
     ]);
 
+    // ── Delete this submission's uploads now that the task exists ──
+    // Sensitive documents shouldn't sit in storage once they've been read; the
+    // contract is already on the ClickUp task. A contract that failed to attach
+    // is kept so an admin can recover it (the daily cleanup removes it after 3 days).
+    const keep = new Set(attachmentResults.errors.map(e => e.name));
+    const uploadedPaths = [...(buckets?.fundDocs || []), ...(buckets?.transcripts || []), ...(buckets?.syndication || [])]
+      .filter(f => f?.path && !keep.has(f.name))
+      .map(f => f.path);
+    const filesDeleted = supabase ? await deleteUploads(supabase, uploadedPaths) : 0;
+
     return res.status(200).json({
       brief,
       taskId,
@@ -799,7 +833,8 @@ export default async function handler(req, res) {
       duplicateFiles,
       attachedFiles: attachmentResults.attached,
       attachmentErrors: attachmentResults.errors,
-      fieldErrors
+      fieldErrors,
+      filesDeleted
     });
 
   } catch (err) {
