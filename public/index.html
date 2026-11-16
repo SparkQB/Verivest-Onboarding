@@ -1022,13 +1022,23 @@ async function uploadPending(bucket) {
   for (const fileObj of pending) {
     fileObj.status = 'uploading';
     renderFileList(bucket);
-    const path = `${bucket}/${Date.now()}-${fileObj.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-    const { error } = await supabaseClient.storage.from('onboarding-docs').upload(path, fileObj.file);
-    if (error) {
-      fileObj.status = 'error';
-    } else {
+    // The server hands out a one-time signed upload URL to signed-in users;
+    // the public key itself has no access to the bucket.
+    try {
+      const res = await apiFetch('/api/upload-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder: bucket, name: fileObj.name }),
+      });
+      if (!res.ok) throw new Error('upload-url ' + res.status);
+      const { path, token } = await res.json();
+      const { error } = await supabaseClient.storage.from('onboarding-docs').uploadToSignedUrl(path, token, fileObj.file);
+      if (error) throw error;
       fileObj.status = 'done';
       fileObj.path = path;
+    } catch (err) {
+      console.error('Upload failed:', err);
+      fileObj.status = 'error';
     }
     renderFileList(bucket);
   }

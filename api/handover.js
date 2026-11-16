@@ -703,7 +703,16 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { formData, customFields, entityName, buckets, crmNotes } = req.body;
+    const { formData, customFields, entityName, crmNotes } = req.body;
+    // Only accept paths the upload form creates (folder/file, one level deep),
+    // so a caller can't make the server read or delete other objects.
+    const UPLOAD_PATH = /^(fund|brownfield|agora|syndication|transcripts)\/[A-Za-z0-9._-]+$/;
+    const onlyUploads = list => (Array.isArray(list) ? list : []).filter(f => typeof f?.path === 'string' && UPLOAD_PATH.test(f.path));
+    const buckets = {
+      fundDocs: onlyUploads(req.body.buckets?.fundDocs),
+      transcripts: onlyUploads(req.body.buckets?.transcripts),
+      syndication: onlyUploads(req.body.buckets?.syndication),
+    };
     // buckets = { fundDocs: [{path, name}], transcripts: [{path, name}], syndication: [{path, name}] }
 
     const supabase = (SUPABASE_URL && SUPABASE_SERVICE_KEY)
