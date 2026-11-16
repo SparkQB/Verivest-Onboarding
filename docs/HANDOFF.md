@@ -1,5 +1,7 @@
 # Verivest Handover — project synopsis
 
+> **Open security work:** see "Security review — 2026-11-16" below. Step 1 is urgent.
+
 Written 2026-11-16 to hand this project to a new Claude account. Everything
 below reflects production as of commit `76d48ea` on `main`.
 
@@ -132,6 +134,57 @@ now show the real reason in the brief and the Vercel logs.
   success; only the brief text says the analysis failed.
 - Cost: roughly $0.15–$0.40 of Claude usage per handover.
 
+## Security review — 2026-11-16 (IN PROGRESS)
+
+Sensitive client documents (PPMs, operating/subscription agreements,
+financials, transcripts) pass through this app. The owner asked for stronger
+protection and for assurance that no AI provider trains on the documents.
+
+### Findings
+
+1. **URGENT — Supabase bucket readable by anyone.** The `onboarding-docs`
+   bucket (Supabase project "Verivest Onboarding", ref `bxjtftykcnlbcnhykoch`)
+   is not marked public, but has a storage policy **"Allow anon downloads
+   1l9vkj1_0"** (`SELECT` to `anon` on `bucket_id = 'onboarding-docs'`). The
+   anon key is embedded in `public/index.html`, so anyone who loads the site
+   can list and download every file. The site sign-in does not protect the
+   bucket. The app does not need this policy: the browser only uploads
+   (policy "Allow anon uploads 1l9vkj1_0", `INSERT` to `anon`) and the server
+   downloads with the service-role key.
+2. **Old files never deleted.** On 2026-11-16 the bucket held 182 files dated
+   2026-08-24 to 2026-11-03. The cleanup cron isn't working (`CRON_SECRET`
+   not set; see Known limitations).
+3. **Uploads don't require sign-in.** Anyone with the anon key can upload to
+   the bucket (they can't read anything once finding 1 is fixed).
+
+### Agreed plan and status
+
+| # | Step | Status |
+|---|---|---|
+| 1 | Remove the anon download policy: `drop policy if exists "Allow anon downloads 1l9vkj1_0" on storage.objects;` | **PENDING** — the first attempt timed out waiting for the owner to approve the Supabase prompt. Run it first. |
+| 2 | Delete all files older than **3 days**. Must go through the Storage API (service-role key); deleting rows from `storage.objects` with SQL does not remove the stored files. Plan: change `api/cleanup.js` retention from 15 days to **3 days**; owner adds `CRON_SECRET` (any long random string) in Vercel (Production) and redeploys; owner clicks **Run** on the job in Vercel → Settings → Cron Jobs; confirm with `select count(*), min(created_at) from storage.objects where bucket_id='onboarding-docs';` | Not started |
+| 3 | **Auto-delete after each handover:** in `api/handover.js`, once the ClickUp task is created successfully, delete that submission's files from Supabase (service-role key). The contract stays on the ClickUp task. The 3-day cron remains as a safety net for abandoned uploads. | Not started |
+| 4 | Signed-in-only uploads: server issues one-time signed upload URLs (`createSignedUploadUrl`) to signed-in users; then drop the anon upload policy so the public key can do nothing. | Recommended, not yet approved |
+| 5 | Company-owned Anthropic API key (company Console org) in `ANTHROPIC_API_KEY`; ask Anthropic about zero data retention if required | Owner to decide |
+| 6 | Check AI/data settings in ClickUp ("ClickUp Brain") and HubSpot ("Breeze"), and who can see the ClickUp list | Owner to check |
+| 7 | Optional: per-person "Sign in with Google" (@verivest.com) instead of the shared password | Idea only |
+
+### AI training — what was said (verify against current terms)
+
+- **Anthropic API** (what the app uses): covered by Anthropic's commercial
+  terms. API inputs/outputs are not used for training by default; data is
+  kept for a limited period; zero data retention can be arranged for
+  qualifying organizations. Confirm on Anthropic's site.
+- **Supabase / Vercel**: storage and hosting providers. Data is encrypted at
+  rest and in transit, and DPAs are available; they are not known to train AI
+  on customer files. Fine to keep **provided access is locked down** (steps
+  1–4).
+- **ClickUp / HubSpot**: hold the brief, contract and CRM data and have their
+  own AI features; check their workspace AI settings (step 6).
+- **Claude chat used for development**: has seen HubSpot client names and
+  emails. Moving to the company enterprise account puts future chats under
+  business terms; on personal plans check the "Help improve Claude" setting.
+
 ## Moving to a new Claude account — checklist
 
 None of the running app depends on the Claude account. GitHub, Vercel,
@@ -159,5 +212,6 @@ the site keeps working throughout the move.
    environment, and delete its `verivest-onboarding` environment if it's no
    longer wanted. Optionally rotate the HubSpot service key (HubSpot →
    Development → Keys) and update `HUBSPOT_TOKEN` in Vercel, then redeploy.
-6. **Give a new Claude session this file first**: "Read docs/HANDOFF.md" is
+6. **Finish the open security steps** in "Security review — 2026-11-16" (step 1 first).
+7. **Give a new Claude session this file first**: "Read docs/HANDOFF.md" is
    enough context to continue.
