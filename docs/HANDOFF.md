@@ -159,9 +159,9 @@ protection and for assurance that no AI provider trains on the documents.
 | 2 | Delete all files older than **3 days** via the Storage API. `api/cleanup.js` walks every folder, keeps 3 days, refuses to run without `CRON_SECRET`, runs daily at 09:00 UTC. | **DONE 2026-11-16.** `CRON_SECRET` set, deployed, first run took the bucket from 182 files to 1 (the owner's test upload). |
 | 3 | **Auto-delete after each handover:** once the ClickUp task exists, `deleteUploads` in `api/handover.js` removes that submission's files (a contract that failed to attach is kept). The 3-day cron is the safety net. | **DONE 2026-11-16** (deployed). Not yet seen on a real submission: on the next handover, check Vercel logs for `[storage] deleted N of N`. |
 | 4 | Signed-in-only uploads: `api/upload-url.js` issues one-time signed upload URLs to signed-in users; the form uploads with `uploadToSignedUrl`; `api/handover.js` only accepts paths the form creates. | **DONE 2026-11-16.** Deployed, then policy "Allow anon uploads 1l9vkj1_0" dropped. The anon key now has no storage access. Upload on the live site verified after the drop. |
-| 5 | Company-owned Anthropic API key (company Console org) in `ANTHROPIC_API_KEY`; ask Anthropic about zero data retention if required | Owner to decide |
-| 6 | Check AI/data settings in ClickUp ("ClickUp Brain") and HubSpot ("Breeze"), and who can see the ClickUp list | Owner to check |
-| 7 | Optional: per-person "Sign in with Google" (@verivest.com) instead of the shared password | Idea only |
+| 5 | Company-owned Anthropic API key (company Console org) in `ANTHROPIC_API_KEY`; ask Anthropic about zero data retention if required | Optional; not pursued as of 2026-11-16 |
+| 6 | Check AI/data settings in ClickUp ("ClickUp Brain") and HubSpot ("Breeze"), and who can see the ClickUp list | Optional. Both are company accounts; their AI settings are left to the company's ClickUp/HubSpot admins. Doesn't affect the app. |
+| 7 | Optional: per-person "Sign in with Google" (@verivest.com) instead of the shared password | Optional; idea only |
 
 ### AI training — what was said (verify against current terms)
 
