@@ -95,6 +95,9 @@ now show the real reason in the brief and the Vercel logs.
     "Investor Servicing Only"; other matches are 1:1 (see `SERVICE_MAP`).
   - Entity Name order: Entity record → deal `entity_name` → playbook
     "Fund:"/"Company:" line → deal name before the last "-" (flagged).
+- **HubSpot Link (Step 1, sent to ClickUp):** points to the Entity record
+  (`…/record/2-9561141/<id>`) since 2026-11-18, at the onboarding team's
+  request. Falls back to the deal link, with a warning, when no Entity is found.
 - **Finding a Record ID:** it's the last number in the HubSpot URL
   (`app.hubspot.com/contacts/5708692/record/0-3/<ID>`), or Actions → View all
   properties → "Record ID".

@@ -325,8 +325,8 @@ footer { border-top:1px solid var(--border); text-align:center; padding:22px; fo
           <input type="number" id="onboarding_fee" placeholder="e.g. 5000" step="0.01">
         </div>
         <div class="field">
-          <label>HubSpot Deal Link</label>
-          <input type="url" id="hubspot_link" placeholder="https://app.hubspot.com/...">
+          <label>HubSpot Entity Link</label>
+          <input type="url" id="hubspot_link" placeholder="https://app.hubspot.com/contacts/5708692/record/2-9561141/...">
         </div>
       </div>
     </div>
@@ -1121,7 +1121,7 @@ function buildReview() {
     }).filter(Boolean).join(' | ');
 
   const sections = [
-    { title: 'Client Information', rows: [['Entity Name', getVal('entity_name')], ['Client #', getVal('client_num')], ['Entity Type', getVal('entity_type')], ['Fund Type', getVal('fund_type')], ['Service', getVal('service')], ['Syndication Type', getVal('syndication_type')], ['Onboarding Fee', getVal('onboarding_fee') ? '$' + Number(getVal('onboarding_fee')).toLocaleString() : ''], ['HubSpot Link', getVal('hubspot_link')], ['Contact Name', getVal('contact_name')], ['Contact Email', getVal('contact_email')], ['Contact Phone', getVal('contact_number')], ['Address', getVal('address')], ['Referral Source', getVal('referral_source')]] },
+    { title: 'Client Information', rows: [['Entity Name', getVal('entity_name')], ['Client #', getVal('client_num')], ['Entity Type', getVal('entity_type')], ['Fund Type', getVal('fund_type')], ['Service', getVal('service')], ['Syndication Type', getVal('syndication_type')], ['Onboarding Fee', getVal('onboarding_fee') ? '$' + Number(getVal('onboarding_fee')).toLocaleString() : ''], ['HubSpot Entity Link', getVal('hubspot_link')], ['Contact Name', getVal('contact_name')], ['Contact Email', getVal('contact_email')], ['Contact Phone', getVal('contact_number')], ['Address', getVal('address')], ['Referral Source', getVal('referral_source')]] },
     { title: 'Agora & Portal', rows: [['Portal Type', getVal('portal_type')], ['Verivest setup portal?', getRadio('portal_setup')], ['Migrating from portal?', getRadio('portal_migrate')], ['Historical data migration?', getRadio('data_migrate')], ['Portal setup scope', getVal('portal_scope')]] },
     { title: 'Contract & Pricing', rows: [['Effective Date', getVal('effective_date')], ['Transaction Fees', getRadio('txn_fees')], ['Fee Notes', getVal('txn_fee_notes')], ['Non-Standard Terms', getVal('non_standard_terms')], ['Add-on Services', getVal('addon_services')], ['Key Promises', getVal('key_promises')]] },
     { title: 'Documents', rows: [['Document Status', docStatus || 'Not specified'], ['Egnyte Folder', getVal('egnyte_url')], ['Document Notes', getVal('doc_notes')], ['Uploaded Files', uploadSummary || 'No files uploaded']] },
@@ -1150,7 +1150,7 @@ FUND TYPE: ${getVal('fund_type') || 'Not specified'}
 SERVICE: ${getVal('service')}
 SYNDICATION TYPE: ${getVal('syndication_type') || 'Not specified'}
 ONBOARDING FEE: ${getVal('onboarding_fee') ? '$' + Number(getVal('onboarding_fee')).toLocaleString() : 'Not specified'}
-HUBSPOT LINK: ${getVal('hubspot_link') || 'Not provided'}
+HUBSPOT ENTITY LINK: ${getVal('hubspot_link') || 'Not provided'}
 CONTACT NAME: ${getVal('contact_name')}
 CONTACT EMAIL: ${getVal('contact_email') || 'Not provided'}
 CONTACT PHONE: ${getVal('contact_number') || 'Not provided'}

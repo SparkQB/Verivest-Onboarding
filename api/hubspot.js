@@ -150,7 +150,14 @@ export function buildForm({ deal, entity, contact, playbook, labels, portalId })
   if (isSyndication && entityType) set('syndication_type', entityType === 'Greenfield' ? 'New Syndication' : 'Existing Syndication');
 
   set('onboarding_fee', d.one_time_fee);
-  set('hubspot_link', `https://app.hubspot.com/contacts/${portalId}/record/0-3/${deal.id}`);
+  // HubSpot Link points at the Entity record (where client data lives now);
+  // the deal is only a fallback when no Entity is linked.
+  if (entity?.id) {
+    set('hubspot_link', `https://app.hubspot.com/contacts/${portalId}/record/${ENTITY_OBJECT}/${entity.id}`);
+  } else {
+    set('hubspot_link', `https://app.hubspot.com/contacts/${portalId}/record/0-3/${deal.id}`);
+    warnings.push('HubSpot Link is the deal link because no Entity was found. Paste the Entity link above to use it instead.');
+  }
 
   set('contact_name', [c.firstname, c.lastname].map(s => (s || '').trim()).filter(Boolean).join(' '));
   set('contact_email', c.email);
