@@ -22,7 +22,7 @@ On submit it:
 | Code | GitHub `SparkQB/Verivest-Onboarding`, branch `main` |
 | Hosting | Vercel project `verivest-onboarding` (team "admin-69135851's projects"), Pro plan, deploys automatically from `main` |
 | Files | Supabase project "Verivest Onboarding" (ref `bxjtftykcnlbcnhykoch`), bucket `onboarding-docs`. Uploads are deleted right after their ClickUp task is created; `api/cleanup.js` runs daily at 09:00 UTC and removes anything older than 3 days |
-| AI | Anthropic API, model `claude-sonnet-4-5`, prepaid credits with auto-reload |
+| AI | Anthropic API, model `claude-sonnet-5-5` (since 2026-11-24; effort `medium`, server-side refusal fallback on), prepaid credits with auto-reload |
 | Tasks | ClickUp list `901702902471` |
 | CRM | HubSpot account `5708692` (read-only) |
 
@@ -117,9 +117,11 @@ now show the real reason in the brief and the Vercel logs.
 
 ## Known limitations / ideas not built
 
-- Each document group sent to Claude is capped at 150K characters. Ideas
-  discussed: share the space fairly across documents instead of cutting the
-  tail, raise the cap, or switch to `claude-sonnet-5` (cheaper, larger context).
+- Each document group sent to Claude may now be up to the model's limit
+  (about 950K tokens, ~2–3M characters; was 150K characters before
+  2026-11-24). Inputs over 1M characters are measured with the free
+  count_tokens endpoint and trimmed to fit. Only the documents are cut; the
+  form data and the list of unreadable files are always kept.
 - Scanned (image-only) PDFs can't be read; they're listed as skipped. Possible
   fix: send those PDFs to Claude directly as documents.
 - The contract is detected by file name only. A contract named e.g.
@@ -129,7 +131,10 @@ now show the real reason in the brief and the Vercel logs.
   "Sign in with Google" limited to @verivest.com.
 - When Claude fails, the task is still created and the form still shows
   success; only the brief text says the analysis failed.
-- Cost: roughly $0.15–$0.40 of Claude usage per handover.
+- Cost: roughly $0.10–$0.40 of Claude usage for a typical handover on
+  Sonnet 5.5 (cheaper per token than Sonnet 4.5, but the model now thinks
+  before writing, which adds some output). Handovers with very large document sets cost more, up to about
+  $2 per document group at the size limit.
 
 ## Security review — 2026-11-16 (steps 1–4 done)
 
