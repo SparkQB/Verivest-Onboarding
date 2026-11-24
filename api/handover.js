@@ -11,8 +11,21 @@ import { requireSession } from './_auth.js';
 
 export const config = { maxDuration: 300 };
 
-// Token limit safety — truncate text if too long (~150k chars ≈ ~37k tokens, safe buffer)
-const MAX_CHARS_PER_BUCKET = 150000;
+// ── CLAUDE MODEL AND LIMITS ──
+const CLAUDE_MODEL = 'claude-sonnet-5-5';
+// Effort sets how carefully the model reads and thinks (low | medium | high | xhigh | max).
+const CLAUDE_EFFORT = 'medium';
+// The model thinks before it writes; thinking counts toward this cap, so it's
+// set well above the length of a brief.
+const CLAUDE_MAX_TOKENS = 16000;
+// Claude Sonnet 5.5 reads up to 1,000,000 tokens per request (input + output).
+// Keep the input under this, leaving room for the reply.
+const MAX_INPUT_TOKENS = 1000000 - CLAUDE_MAX_TOKENS - 30000;
+// Character cap per document group. ~3 characters per token for typical
+// documents (fewer for number-heavy files), so this is close to the token
+// limit; anything that still turns out too long is measured and trimmed in
+// fitToContext before sending.
+const MAX_CHARS_PER_BUCKET = 3000000;
 
 // A document with less readable text than this is treated as unreadable and skipped
 const MIN_TEXT_CHARS = 50;
@@ -458,20 +471,50 @@ async function downloadAndExtract(supabase, files) {
 
 // Builds the user message for one Claude call. Truncation only ever cuts the
 // documents, never the form data or the list of unreadable files.
-function buildClaudeInput(formData, label, extracted, emptyMessage) {
+function buildClaudeInput(formData, label, extracted, emptyMessage, maxChars = MAX_CHARS_PER_BUCKET) {
   const skippedNote = extracted.skipped.length
     ? `\n\n=== FILES THAT COULD NOT BE READ ===\nThe following uploaded files could not be read and were NOT analyzed. Do not guess at their contents. Mention them under the relevant section so the team knows to review them manually:\n${extracted.skipped.map(s => `- ${s.name} (${s.reason})`).join('\n')}`
     : '';
   const header = `${formData || ''}${skippedNote}\n\n=== ${label} ===\n`;
   const body = extracted.text || emptyMessage;
-  return header + truncateText(body, Math.max(10000, MAX_CHARS_PER_BUCKET - header.length));
+  return header + truncateText(body, Math.max(10000, maxChars - header.length));
+}
+
+// Large inputs: measure the real token count (free count_tokens endpoint) and,
+// if it's over the model's limit, cut the documents to fit. Small inputs can't
+// be over the limit, so they're sent as-is without measuring.
+const COUNT_TOKENS_ABOVE_CHARS = 1000000;
+async function fitToContext(apiKey, systemPrompt, build, label) {
+  let input = build(MAX_CHARS_PER_BUCKET);
+  for (let attempt = 0; attempt < 3 && input.length > COUNT_TOKENS_ABOVE_CHARS; attempt++) {
+    let tokens;
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages/count_tokens', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({ model: CLAUDE_MODEL, system: systemPrompt, messages: [{ role: 'user', content: input }] }),
+      });
+      const data = await res.json().catch(() => null);
+      tokens = data?.input_tokens;
+      if (!res.ok || !Number.isFinite(tokens)) throw new Error(data?.error?.message || `HTTP ${res.status}`);
+    } catch (err) {
+      // Can't measure: fall back to a conservative 2.5 characters per token
+      console.warn(`[${label}] could not count tokens (${err.message}); using an estimate`);
+      tokens = Math.ceil(input.length / 2.5);
+    }
+    if (tokens <= MAX_INPUT_TOKENS) break;
+    const target = Math.floor(input.length * (MAX_INPUT_TOKENS / tokens) * 0.97);
+    console.log(`[${label}] input is ${tokens} tokens, over the ${MAX_INPUT_TOKENS} limit; trimming to ${target} characters`);
+    input = build(target);
+  }
+  return input;
 }
 
 // ── CLAUDE CALL ──────────────────────────────────────────────────────────────
 
 const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504, 529]);
 
-async function callClaude(apiKey, systemPrompt, userContent, maxTokens = 2000, label = 'claude') {
+async function callClaude(apiKey, systemPrompt, userContent, maxTokens = CLAUDE_MAX_TOKENS, label = 'claude') {
   const maxAttempts = 3;
   let lastError;
 
@@ -482,11 +525,15 @@ async function callClaude(apiKey, systemPrompt, userContent, maxTokens = 2000, l
         headers: {
           'Content-Type': 'application/json',
           'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01'
+          'anthropic-version': '2023-06-01',
+          // If the model declines (a safety refusal), the API retries the request on a fallback model
+          'anthropic-beta': 'server-side-fallback-2026-07-01'
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-5',
+          model: CLAUDE_MODEL,
           max_tokens: maxTokens,
+          output_config: { effort: CLAUDE_EFFORT },
+          fallbacks: 'default',
           system: systemPrompt,
           messages: [{ role: 'user', content: userContent }]
         })
@@ -507,13 +554,19 @@ async function callClaude(apiKey, systemPrompt, userContent, maxTokens = 2000, l
         continue;
       }
 
-      const text = (data.content || []).map(b => b.text || '').join('').trim();
-      if (!text) throw new Error(`Claude returned an empty response (stop_reason: ${data.stop_reason})`);
+      if (data.stop_reason === 'refusal') {
+        const why = [data.stop_details?.category, data.stop_details?.explanation].filter(Boolean).join(': ');
+        throw Object.assign(new Error(`Claude declined this request${why ? ` (${why})` : ''}`), { noRetry: true });
+      }
+      // The reply can start with a thinking block; only text blocks form the brief
+      const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+      if (!text) throw Object.assign(new Error(`Claude returned an empty response (stop_reason: ${data.stop_reason})`), { noRetry: true });
+      if (data.stop_reason === 'max_tokens') console.warn(`[${label}] reply hit max_tokens and may be cut short`);
       return text;
     } catch (err) {
       lastError = err;
       // fetch() itself throws on network errors — retry those too
-      if (err.message?.startsWith('Claude API') || attempt === maxAttempts) break;
+      if (err.message?.startsWith('Claude API') || err.noRetry || attempt === maxAttempts) break;
       console.warn(`[${label}] attempt ${attempt} network error: ${err.message}`);
       await new Promise(r => setTimeout(r, 2000 * 2 ** (attempt - 1)));
     }
@@ -731,23 +784,26 @@ export default async function handler(req, res) {
 
     // ── Claude calls in parallel ──
     // Each call always runs on the form data; unreadable files are listed, not sent.
-    const fundDocsInput = buildClaudeInput(formData, 'FUND DOCUMENTS', fundDocs,
-      fundDocs.skipped.length ? '[No readable fund documents — see list of unreadable files above]' : '[No fund documents uploaded]');
+    const fundDocsInput = max => buildClaudeInput(formData, 'FUND DOCUMENTS', fundDocs,
+      fundDocs.skipped.length ? '[No readable fund documents — see list of unreadable files above]' : '[No fund documents uploaded]', max);
     // HubSpot notes (pulled on the form) go to the client-context call, ahead of the transcripts
     const crmText = typeof crmNotes === 'string' ? sanitizeText(crmNotes).slice(0, 40000) : '';
     const formWithCrm = crmText ? `${formData}\n\n=== HUBSPOT CRM NOTES (Sales New Deal Playbook and other deal/entity notes) ===\n${crmText}` : formData;
-    const transcriptInput = buildClaudeInput(formWithCrm, 'CALL TRANSCRIPTS', transcripts,
-      transcripts.skipped.length ? '[No readable transcripts — see list of unreadable files above]' : '[No transcripts uploaded]');
+    const transcriptInput = max => buildClaudeInput(formWithCrm, 'CALL TRANSCRIPTS', transcripts,
+      transcripts.skipped.length ? '[No readable transcripts — see list of unreadable files above]' : '[No transcripts uploaded]', max);
+    // Measures and, if needed, trims the input to fit the model, then calls Claude
+    const runClaude = async (prompt, build, label) =>
+      callClaude(ANTHROPIC_KEY, prompt, await fitToContext(ANTHROPIC_KEY, prompt, build, label), CLAUDE_MAX_TOKENS, label);
 
     const claudePromises = [
-      callClaude(ANTHROPIC_KEY, PROMPT_FUND_DOCS, fundDocsInput, 1500, 'fund-docs'),
-      callClaude(ANTHROPIC_KEY, PROMPT_TRANSCRIPTS, transcriptInput, 2000, 'transcripts'),
+      runClaude(PROMPT_FUND_DOCS, fundDocsInput, 'fund-docs'),
+      runClaude(PROMPT_TRANSCRIPTS, transcriptInput, 'transcripts'),
     ];
 
     // Syndication only runs when at least one syndication document was readable
     if (syndication.text) {
-      const syndicationInput = buildClaudeInput(formData, 'SYNDICATION DOCUMENTS', syndication, '');
-      claudePromises.push(callClaude(ANTHROPIC_KEY, PROMPT_SYNDICATION, syndicationInput, 1000, 'syndication'));
+      const syndicationInput = max => buildClaudeInput(formData, 'SYNDICATION DOCUMENTS', syndication, '', max);
+      claudePromises.push(runClaude(PROMPT_SYNDICATION, syndicationInput, 'syndication'));
     }
 
     const claudeResults = await Promise.allSettled(claudePromises);
